@@ -585,6 +585,10 @@ const blog  = createFromTemplate(db, 'my-blog', 'content');
 
 - [js-vector-store](https://github.com/MauricioPerera/js-vector-store) — Vector database para busqueda semantica (embeddings, similarity, RAG). Misma filosofia, mismos adapters.
 
+## Creditos
+
+Creado por [Mauricio Perera](https://www.linkedin.com/in/mauricioperera/)
+
 ## Licencia
 
 MIT

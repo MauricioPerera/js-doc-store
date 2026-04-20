@@ -584,6 +584,8 @@ const blog  = createFromTemplate(db, 'my-blog', 'content');
 ## Relacionado
 
 - [js-vector-store](https://github.com/MauricioPerera/js-vector-store) — Vector database para busqueda semantica (embeddings, similarity, RAG). Misma filosofia, mismos adapters.
+- [js-git-store](https://github.com/MauricioPerera/js-git-store) — Adapter git-nativo que implementa la interfaz `FileStorageAdapter` de este repo. Tree-first, blob-on-demand, two-branch layout.
+- [llm-wiki-kit](https://github.com/MauricioPerera/llm-wiki-kit) — Wiki mantenida por LLM construida sobre los 3 anteriores. Ingest → facts/entities/concepts/synthesis, retrieval en 3 capas (grep + BM25 + embeddings), supersesion explicita. Obsidian-compatible.
 
 ## Creditos
 

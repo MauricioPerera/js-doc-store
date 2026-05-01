@@ -1808,6 +1808,7 @@ class Auth {
    * @param {number} [opts.tokenExpiry]       JWT expiry in seconds (default: 86400 = 24h)
    * @param {number} [opts.hashIterations]    PBKDF2 iterations (default: 100000)
    * @param {string[]} [opts.defaultRoles]    Roles for new users (default: ['user'])
+   * @param {boolean} [opts.validateEmail=true]  Validate email format (RFC-ish) on register
    */
   constructor(db, opts = {}) {
     this.db              = db;
@@ -1817,6 +1818,7 @@ class Auth {
     this.tokenExpiry     = opts.tokenExpiry || 86400;
     this.hashIterations  = opts.hashIterations || 100000;
     this.defaultRoles    = opts.defaultRoles || ['user'];
+    this.validateEmail   = opts.validateEmail !== false;  // default: true
 
     if (!this.secret) throw new Error('Auth: secret is required');
 
@@ -1944,10 +1946,15 @@ class Auth {
     if (!email || !password) throw new Error('Email and password required');
     if (password.length < 6) throw new Error('Password must be at least 6 characters');
 
+    const normalized = email.toLowerCase().trim();
+    if (this.validateEmail && !_EMAIL_RE.test(normalized)) {
+      throw new Error('Invalid email format');
+    }
+
     const passwordHash = await this._hashPassword(password);
 
     const user = this._users.insert({
-      email: email.toLowerCase().trim(),
+      email: normalized,
       passwordHash,
       roles: this.defaultRoles.slice(),
       active: true,

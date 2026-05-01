@@ -246,6 +246,44 @@ class CloudflareKVAdapter {
     });
     await Promise.all(promises);
   }
+
+  /**
+   * Lists all KV keys under this adapter's prefix.
+   * Paginates internally if KV returns more than 1000 keys.
+   * @returns {Promise<string[]>} Filenames without the prefix (suitable for preload()).
+   */
+  async listKeys() {
+    const result = [];
+    let cursor;
+    do {
+      const list = await this.kv.list({ prefix: this.prefix, cursor });
+      for (const k of list.keys) {
+        if (this.prefix) {
+          if (k.name.startsWith(this.prefix)) {
+            result.push(k.name.slice(this.prefix.length));
+          }
+        } else {
+          result.push(k.name);
+        }
+      }
+      // KV's list returns either { list_complete: true } or { cursor: '...' }
+      cursor = list.list_complete ? undefined : list.cursor;
+    } while (cursor);
+    return result;
+  }
+
+  /**
+   * Convenience: discover all keys via listKeys() then preload() them.
+   * Useful when collection names aren't known ahead of time (multi-tenant,
+   * EncryptedAdapter wrapping, etc.).
+   * @returns {Promise<string[]>} The filenames that were preloaded.
+   */
+  async preloadAll() {
+    const keys = await this.listKeys();
+    if (keys.length > 0) await this.preload(keys);
+    return keys;
+  }
+
   readJson(f)     { return this._cache.get(f) ?? null; }
   writeJson(f, v) { this._cache.set(f, v); }
   delete(f)       { this._cache.delete(f); }

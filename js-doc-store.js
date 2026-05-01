@@ -1798,16 +1798,28 @@ class FieldCrypto {
 //   const verified = await auth.verify(token);
 //   await auth.assignRole(user._id, 'admin');
 
+/**
+ * @typedef {object} PasswordPolicy
+ * @property {number} [minLength=6]            Minimum length (>= 1)
+ * @property {number} [maxLength]              Maximum length (default: no limit)
+ * @property {boolean} [requireUppercase=false] Must contain A-Z
+ * @property {boolean} [requireLowercase=false] Must contain a-z
+ * @property {boolean} [requireDigit=false]     Must contain 0-9
+ * @property {boolean} [requireSymbol=false]    Must contain non-alphanumeric
+ * @property {(pw: string) => string|null} [customValidator]  Return error message or null if OK
+ */
+
 class Auth {
   /**
    * @param {DocStore} db
    * @param {object} opts
-   * @param {string} opts.secret              JWT signing secret
-   * @param {string} [opts.usersCollection]   Default: '_users'
-   * @param {string} [opts.sessionsCollection] Default: '_sessions'
-   * @param {number} [opts.tokenExpiry]       JWT expiry in seconds (default: 86400 = 24h)
-   * @param {number} [opts.hashIterations]    PBKDF2 iterations (default: 100000)
-   * @param {string[]} [opts.defaultRoles]    Roles for new users (default: ['user'])
+   * @param {string} opts.secret                JWT signing secret
+   * @param {string} [opts.usersCollection]     Default: '_users'
+   * @param {string} [opts.sessionsCollection]  Default: '_sessions'
+   * @param {number} [opts.tokenExpiry]         JWT expiry in seconds (default: 86400 = 24h)
+   * @param {number} [opts.hashIterations]      PBKDF2 iterations (default: 100000)
+   * @param {string[]} [opts.defaultRoles]      Roles for new users (default: ['user'])
+   * @param {PasswordPolicy} [opts.passwordPolicy] Password validation rules. Defaults to {minLength: 6}
    */
   constructor(db, opts = {}) {
     this.db              = db;
@@ -1818,10 +1830,56 @@ class Auth {
     this.hashIterations  = opts.hashIterations || 100000;
     this.defaultRoles    = opts.defaultRoles || ['user'];
 
+    // Password policy: backward-compatible default = { minLength: 6 }
+    const policy = opts.passwordPolicy || {};
+    this.passwordPolicy = {
+      minLength: policy.minLength ?? 6,
+      maxLength: policy.maxLength ?? null,
+      requireUppercase: !!policy.requireUppercase,
+      requireLowercase: !!policy.requireLowercase,
+      requireDigit: !!policy.requireDigit,
+      requireSymbol: !!policy.requireSymbol,
+      customValidator: typeof policy.customValidator === 'function' ? policy.customValidator : null,
+    };
+
     if (!this.secret) throw new Error('Auth: secret is required');
 
     this._users    = null;
     this._sessions = null;
+  }
+
+  /**
+   * Validates a password against the configured policy.
+   * Throws Error with descriptive message on first failure.
+   * @param {string} password
+   */
+  _validatePassword(password) {
+    if (typeof password !== 'string') throw new Error('Password must be a string');
+
+    const p = this.passwordPolicy;
+
+    if (p.minLength != null && password.length < p.minLength) {
+      throw new Error(`Password must be at least ${p.minLength} characters`);
+    }
+    if (p.maxLength != null && password.length > p.maxLength) {
+      throw new Error(`Password must be at most ${p.maxLength} characters`);
+    }
+    if (p.requireUppercase && !/[A-Z]/.test(password)) {
+      throw new Error('Password must contain at least one uppercase letter');
+    }
+    if (p.requireLowercase && !/[a-z]/.test(password)) {
+      throw new Error('Password must contain at least one lowercase letter');
+    }
+    if (p.requireDigit && !/\d/.test(password)) {
+      throw new Error('Password must contain at least one digit');
+    }
+    if (p.requireSymbol && !/[^A-Za-z0-9]/.test(password)) {
+      throw new Error('Password must contain at least one symbol');
+    }
+    if (p.customValidator) {
+      const err = p.customValidator(password);
+      if (err) throw new Error(typeof err === 'string' ? err : 'Password failed custom validation');
+    }
   }
 
   /** Inicializa colecciones e indices. Llamar una vez al inicio. */
@@ -1942,7 +2000,7 @@ class Auth {
    */
   async register(email, password, profile = {}) {
     if (!email || !password) throw new Error('Email and password required');
-    if (password.length < 6) throw new Error('Password must be at least 6 characters');
+    this._validatePassword(password);
 
     const passwordHash = await this._hashPassword(password);
 
@@ -2037,7 +2095,7 @@ class Auth {
     const valid = await this._verifyPassword(oldPassword, user.passwordHash);
     if (!valid) throw new Error('Invalid current password');
 
-    if (newPassword.length < 6) throw new Error('Password must be at least 6 characters');
+    this._validatePassword(newPassword);
 
     const hash = await this._hashPassword(newPassword);
     this._users.update({ _id: userId }, { $set: { passwordHash: hash } });
@@ -2051,7 +2109,7 @@ class Auth {
    * Reset de password (admin/recovery — sin verificar password viejo).
    */
   async resetPassword(userId, newPassword) {
-    if (newPassword.length < 6) throw new Error('Password must be at least 6 characters');
+    this._validatePassword(newPassword);
     const hash = await this._hashPassword(newPassword);
     this._users.update({ _id: userId }, { $set: { passwordHash: hash } });
     this._sessions.removeMany({ userId });

@@ -269,6 +269,36 @@ class CloudflareKVAdapter {
     this._cache.delete(f);
     await this.kv.delete(this._key(f));
   }
+
+  /**
+   * List all keys in KV under this adapter's prefix.
+   * Handles KV pagination (cursor) for namespaces with >1000 keys.
+   * @returns {Promise<string[]>} Filenames without the prefix
+   */
+  async listKeys() {
+    const result = [];
+    let cursor = undefined;
+    do {
+      const listOpts = { prefix: this.prefix };
+      if (cursor) listOpts.cursor = cursor;
+      const list = await this.kv.list(listOpts);
+      for (const key of list.keys) {
+        result.push(key.name.slice(this.prefix.length));
+      }
+      cursor = list.list_complete === false ? list.cursor : undefined;
+    } while (cursor);
+    return result;
+  }
+
+  /**
+   * Preload all files available under this prefix.
+   * Convenience wrapper: equivalent to `preload(await listKeys())`.
+   * @returns {Promise<void>}
+   */
+  async preloadAll() {
+    const keys = await this.listKeys();
+    if (keys.length > 0) await this.preload(keys);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1714,6 +1744,27 @@ class EncryptedAdapter {
       this.inner.writeJson(filename, { __enc: encrypted });
     }
     this._pending.clear();
+  }
+
+  /**
+   * Delegate listKeys() to the inner adapter if it supports it.
+   * @returns {Promise<string[]>}
+   */
+  async listKeys() {
+    if (typeof this.inner.listKeys === 'function') {
+      return this.inner.listKeys();
+    }
+    throw new Error('Inner adapter does not support listKeys()');
+  }
+
+  /**
+   * Preload and decrypt all files from the inner adapter.
+   * Delegates listKeys() then calls preload().
+   * @returns {Promise<void>}
+   */
+  async preloadAll() {
+    const keys = await this.listKeys();
+    if (keys.length > 0) await this.preload(keys);
   }
 }
 

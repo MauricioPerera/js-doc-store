@@ -406,9 +406,15 @@ new DocStore(new MemoryStorageAdapter());
 
 // Cloudflare Workers KV
 const adapter = new CloudflareKVAdapter(env.MY_KV, 'prefix/');
-await adapter.preload(['users.docs.json', 'users.meta.json']);
+await adapter.preloadAll();  // carga todos los archivos bajo el prefix
 new DocStore(adapter);
 // despues: db.flush(); await adapter.persist();
+
+// O preload selectivo (si sabes que archivos necesitas):
+// await adapter.preload(['users.docs.json', 'users.meta.json']);
+
+// Listar keys disponibles:
+// const keys = await adapter.listKeys(); // ['users.docs.json', 'users.meta.json', ...]
 
 // Encriptado (wraps any adapter)
 const adapter = await EncryptedAdapter.create(innerAdapter, 'password');

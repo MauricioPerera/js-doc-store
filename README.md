@@ -27,6 +27,9 @@ const {
   EncryptedAdapter,
   FieldCrypto,
   Auth,
+  Table,
+  TEMPLATES,
+  createFromTemplate,
 } = require('js-doc-store');
 ```
 

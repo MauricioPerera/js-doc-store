@@ -79,6 +79,15 @@ function matchFilter(doc, filter) {
           if (!Array.isArray(val) || val.length !== target) return false;
           break;
         }
+        case '$not': {
+          // Field-level $not: negate the result of evaluating the nested operators
+          // e.g. {"stock": {"$not": {"$eq": 0}}} → match docs where stock != 0
+          if (typeof target === 'object' && target !== null) {
+            const subFilter = { [key]: target };
+            if (matchFilter(doc, subFilter)) return false;
+          }
+          break;
+        }
         default: break;
       }
     }
@@ -1653,9 +1662,10 @@ class EncryptedAdapter {
         try {
           const decrypted = await this._decrypt(encrypted.__enc);
           this._cache.set(f, decrypted);
-        } catch {
-          // Key incorrecta o datos corruptos
-          this._cache.set(f, null);
+        } catch (err) {
+          // Key incorrecta o datos corruptos — mark as decrypt failure
+          // so readJson can distinguish "no data" from "can't decrypt"
+          this._cache.set(f, { __decryptFailed: true, file: f, error: err?.message ?? String(err) });
         }
       }
     }
@@ -1664,14 +1674,18 @@ class EncryptedAdapter {
   readJson(filename) {
     // Si hay cache (preloaded), usar
     if (this._cache && this._cache.has(filename)) {
-      return this._cache.get(filename);
+      const cached = this._cache.get(filename);
+      if (cached && cached.__decryptFailed) {
+        throw new Error(`Decryption failed for ${cached.file}: wrong key or corrupted data`);
+      }
+      return cached;
     }
     // Sync read: intenta leer y desencriptar (solo funciona si ya esta en cache)
     const encrypted = this.inner.readJson(filename);
     if (!encrypted) return null;
     if (!encrypted.__enc) return encrypted; // no encriptado, leer directo
-    // No podemos desencriptar sync — retornar null
-    return null;
+    // Encrypted data but no cache — cannot decrypt synchronously
+    throw new Error(`Encrypted data found in ${filename} but no decryption cache available (call preload first or check encryption key)`);
   }
 
   writeJson(filename, data) {

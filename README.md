@@ -316,6 +316,36 @@ const auth = new Auth(db, { secret: 'jwt-secret-key' });
 await auth.init();
 ```
 
+### Password policy
+
+```js
+const auth = new Auth(db, {
+  secret: 'jwt-secret',
+  passwordPolicy: {
+    minLength: 12,                  // default: 6
+    maxLength: 128,                 // default: sin limite
+    requireUppercase: true,         // default: false
+    requireLowercase: true,         // default: false
+    requireDigit: true,             // default: false
+    requireSymbol: true,            // default: false
+    customValidator: (pw) => {      // default: undefined
+      if (pw.includes('password')) return 'No puede contener "password"';
+      return null; // null = OK
+    },
+  },
+});
+```
+
+La politica se aplica en `register()`, `changePassword()` y `resetPassword()`. Por default solo valida `minLength: 6` (backward compatible).
+
+### Email validation
+
+Por default, `register()` valida el formato del email con `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`. Para desactivarlo (ej: usar usernames en vez de emails):
+
+```js
+const auth = new Auth(db, { secret: '...', validateEmail: false });
+```
+
 ### Registro y login
 
 ```js

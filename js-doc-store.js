@@ -1822,6 +1822,15 @@ class Auth {
    * @param {number} [opts.tokenExpiry]       JWT expiry in seconds (default: 86400 = 24h)
    * @param {number} [opts.hashIterations]    PBKDF2 iterations (default: 100000)
    * @param {string[]} [opts.defaultRoles]    Roles for new users (default: ['user'])
+   * @param {boolean} [opts.validateEmail]    Validate email format on register (default: true)
+   * @param {object}  [opts.passwordPolicy]   Password validation rules
+   * @param {number}  [opts.passwordPolicy.minLength]        Min length (default: 6)
+   * @param {number}  [opts.passwordPolicy.maxLength]        Max length (default: undefined)
+   * @param {boolean} [opts.passwordPolicy.requireUppercase] Require uppercase letter (default: false)
+   * @param {boolean} [opts.passwordPolicy.requireLowercase] Require lowercase letter (default: false)
+   * @param {boolean} [opts.passwordPolicy.requireDigit]     Require digit (default: false)
+   * @param {boolean} [opts.passwordPolicy.requireSymbol]    Require symbol (default: false)
+   * @param {Function} [opts.passwordPolicy.customValidator] Custom validator: (pw) => string|null
    */
   constructor(db, opts = {}) {
     this.db              = db;
@@ -1831,11 +1840,45 @@ class Auth {
     this.tokenExpiry     = opts.tokenExpiry || 86400;
     this.hashIterations  = opts.hashIterations || 100000;
     this.defaultRoles    = opts.defaultRoles || ['user'];
+    this.validateEmail   = opts.validateEmail !== false; // default: true
+    this.passwordPolicy  = Object.assign({ minLength: 6 }, opts.passwordPolicy || {});
 
     if (!this.secret) throw new Error('Auth: secret is required');
 
     this._users    = null;
     this._sessions = null;
+  }
+
+  /**
+   * Validates a password against the configured policy.
+   * @param {string} password
+   * @returns {string|null} Error message, or null if valid
+   */
+  _validatePassword(password) {
+    const p = this.passwordPolicy;
+    if (password.length < p.minLength) {
+      return `Password must be at least ${p.minLength} characters`;
+    }
+    if (p.maxLength && password.length > p.maxLength) {
+      return `Password must be at most ${p.maxLength} characters`;
+    }
+    if (p.requireUppercase && !/[A-Z]/.test(password)) {
+      return 'Password must contain at least one uppercase letter';
+    }
+    if (p.requireLowercase && !/[a-z]/.test(password)) {
+      return 'Password must contain at least one lowercase letter';
+    }
+    if (p.requireDigit && !/[0-9]/.test(password)) {
+      return 'Password must contain at least one digit';
+    }
+    if (p.requireSymbol && !/[^A-Za-z0-9]/.test(password)) {
+      return 'Password must contain at least one symbol';
+    }
+    if (typeof p.customValidator === 'function') {
+      const err = p.customValidator(password);
+      if (err) return err;
+    }
+    return null;
   }
 
   /** Inicializa colecciones e indices. Llamar una vez al inicio. */
@@ -1956,12 +1999,19 @@ class Auth {
    */
   async register(email, password, profile = {}) {
     if (!email || !password) throw new Error('Email and password required');
-    if (password.length < 6) throw new Error('Password must be at least 6 characters');
+
+    const normalizedEmail = email.toLowerCase().trim();
+    if (this.validateEmail && !_EMAIL_RE.test(normalizedEmail)) {
+      throw new Error('Invalid email format');
+    }
+
+    const pwErr = this._validatePassword(password);
+    if (pwErr) throw new Error(pwErr);
 
     const passwordHash = await this._hashPassword(password);
 
     const user = this._users.insert({
-      email: email.toLowerCase().trim(),
+      email: normalizedEmail,
       passwordHash,
       roles: this.defaultRoles.slice(),
       active: true,
@@ -2051,7 +2101,8 @@ class Auth {
     const valid = await this._verifyPassword(oldPassword, user.passwordHash);
     if (!valid) throw new Error('Invalid current password');
 
-    if (newPassword.length < 6) throw new Error('Password must be at least 6 characters');
+    const pwErr = this._validatePassword(newPassword);
+    if (pwErr) throw new Error(pwErr);
 
     const hash = await this._hashPassword(newPassword);
     this._users.update({ _id: userId }, { $set: { passwordHash: hash } });
@@ -2065,7 +2116,8 @@ class Auth {
    * Reset de password (admin/recovery — sin verificar password viejo).
    */
   async resetPassword(userId, newPassword) {
-    if (newPassword.length < 6) throw new Error('Password must be at least 6 characters');
+    const pwErr = this._validatePassword(newPassword);
+    if (pwErr) throw new Error(pwErr);
     const hash = await this._hashPassword(newPassword);
     this._users.update({ _id: userId }, { $set: { passwordHash: hash } });
     this._sessions.removeMany({ userId });

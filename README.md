@@ -1,10 +1,18 @@
 # js-doc-store
 
+[![npm](https://img.shields.io/npm/v/js-doc-store)](https://www.npmjs.com/package/js-doc-store)
+
 Document database en vanilla JS — zero dependencias. Corre en Node.js, browser, Cloudflare Workers, Deno, Bun.
 
 Queries estilo MongoDB con indices, joins, aggregation, encriptacion y autenticacion. Un solo archivo.
 
 ## Instalacion
+
+```bash
+npm install js-doc-store
+```
+
+O copiar el archivo directamente:
 
 ```bash
 cp js-doc-store.js tu-proyecto/
@@ -19,7 +27,7 @@ const {
   EncryptedAdapter,
   FieldCrypto,
   Auth,
-} = require('./js-doc-store');
+} = require('js-doc-store');
 ```
 
 ## Quick Start
@@ -132,7 +140,8 @@ users.count({ age: { $gte: 18 } });    // con filtro
 |---|---|---|
 | `$and` | `{ $and: [{ age: { $gte: 18 } }, { active: true }] }` | Todos deben cumplir |
 | `$or` | `{ $or: [{ city: 'Madrid' }, { city: 'Barcelona' }] }` | Al menos uno cumple |
-| `$not` | `{ $not: { status: 'deleted' } }` | Niega el filtro |
+| `$not` | `{ $not: { status: 'deleted' } }` | Niega el filtro (top-level) |
+| `$not` | `{ stock: { $not: { $eq: 0 } } }` | Niega operador a nivel de campo |
 
 ### Dot notation
 
@@ -581,9 +590,36 @@ const blog  = createFromTemplate(db, 'my-blog', 'content');
 | `inventory` | SKU (unique), Name, Category, Price, Stock, Active, ImageURL, Number |
 | `content` | Title, Body, Author, Status (Draft/Review/Published/Archived), Category, Tags, PublishedAt, URL, Number, CreatedAt |
 
-## Relacionado
+## Ecosistema
 
-- [js-vector-store](https://github.com/MauricioPerera/js-vector-store) — Vector database para busqueda semantica (embeddings, similarity, RAG). Misma filosofia, mismos adapters.
+js-doc-store forma parte de un stack completo para agentes LLM:
+
+| Paquete | npm | Descripcion |
+|---------|-----|-------------|
+| **js-doc-store** | [![npm](https://img.shields.io/npm/v/js-doc-store)](https://www.npmjs.com/package/js-doc-store) | Document database (este paquete) |
+| **[js-vector-store](https://github.com/MauricioPerera/js-vector-store)** | [![npm](https://img.shields.io/npm/v/js-vector-store)](https://www.npmjs.com/package/js-vector-store) | Vector database para busqueda semantica |
+| **[just-bash-data](https://github.com/MauricioPerera/just-bash-data)** | [![npm](https://img.shields.io/npm/v/just-bash-data)](https://www.npmjs.com/package/just-bash-data) | Plugin [just-bash](https://github.com/vercel-labs/just-bash): expone `db` y `vec` como comandos shell para agentes LLM |
+| **[just-bash-wiki](https://github.com/MauricioPerera/just-bash-wiki)** | [![npm](https://img.shields.io/npm/v/just-bash-wiki)](https://www.npmjs.com/package/just-bash-wiki) | Wiki persistente mantenido por LLMs ([Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)) |
+
+### Arquitectura del stack
+
+```
+LLM Agent (Claude, GPT, Gemma, etc.)
+    │ tool_use
+    ▼
+just-bash (sandboxed bash interpreter)
+    │
+    ├── just-bash-wiki  →  wiki command (init, source, page, search, lint)
+    │       │
+    └── just-bash-data  →  db command + vec command
+            │                   │
+            ├── js-doc-store    └── js-vector-store
+            │   (CRUD, queries,     (embeddings, cosine,
+            │    indexes, auth,      IVF, Matryoshka,
+            │    encryption)         quantization)
+            │
+            └── Storage Adapters (Memory, File, KV, Encrypted)
+```
 
 ## Creditos
 

@@ -109,7 +109,8 @@ Cuando el contenido esta listo:
 - Activa commits automaticos con `GIT_STORAGE=1`. Cada vez que los datos se persisten, se ejecuta `git add -A` y `git commit`.
 - Personaliza el mensaje con `GIT_COMMIT_MESSAGE`.
 - **Auto-push**: `GIT_AUTO_PUSH=1` empuja automaticamente al remote despues de cada commit. Configura `GIT_PUSH_REMOTE` (default: origin) y `GIT_PUSH_BRANCH` (default: master).
-- **Batch commits**: `GIT_BATCH_INTERVAL=300` acumula cambios y commitea cada 300 segundos (5 minutos). Esto evita un commit por cada operacion de escritura. Default: 0 (inmediato).
+- **Batch commits**: `GIT_BATCH_INTERVAL=300` acumula cambios y commitea cada 300 segundos (5 minutos). Default: 0 (inmediato).
+- **Ignore binarios**: `GIT_IGNORE_BIN=1` crea/actualiza un `.gitignore` que ignora `*.bin` y `*.vec`. Util cuando usas vector stores y no quieres trackear archivos binarios grandes en git.
 - Ideal para versionar tus colecciones en un repo separado o para backup incremental.
 - Nota: si `ENCRYPTION_KEY` tambien esta activa, los commits contendran blobs cifrados, lo que permite subirlos a GitHub sin riesgo.
 

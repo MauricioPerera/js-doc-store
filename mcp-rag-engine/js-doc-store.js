@@ -2320,6 +2320,7 @@ class GitStorageAdapter {
     this.pushRemote = opts.pushRemote || "origin";
     this.pushBranch = opts.pushBranch || "master";
     this.batchIntervalMs = opts.batchIntervalMs || 0;
+    this.ignoreBin = opts.ignoreBin || false;
     this._dirty = false;
     this._cp = null;
     this._timer = null;
@@ -2411,17 +2412,41 @@ class GitStorageAdapter {
     this._timer = setTimeout(() => {
       this._timer = null;
       if (this._dirty) {
-        this.persist().catch(() => {});
+        try { this._doCommit(); } catch {}
       }
     }, this.batchIntervalMs);
   }
 
-  _doCommit() {
+  _ensureGitignore(cwd) {
+    if (!this.ignoreBin) return;
+    const fs = require("fs");
+    const path = require("path");
+    const gitignorePath = path.join(cwd, ".gitignore");
+    let content = "";
+    try {
+      content = fs.readFileSync(gitignorePath, "utf-8");
+    } catch {}
+    const lines = content.split("\n").map(l => l.trim());
+    const needed = ["*.bin", "*.vec"];
+    let changed = false;
+    for (const rule of needed) {
+      if (!lines.includes(rule)) {
+        content += (content.endsWith("\n") || content === "" ? "" : "\n") + rule + "\n";
+        changed = true;
+      }
+    }
+    if (changed) {
+      fs.writeFileSync(gitignorePath, content, "utf-8");
+    }
+  }
+
+    _doCommit() {
     const { execSync } = this._getCp();
     const cwd = this.repoPath;
     if (!this._isGitRepo(cwd)) {
       try { execSync("git init", { cwd, stdio: "ignore" }); } catch {}
     }
+    this._ensureGitignore(cwd);
     try { execSync("git add -A", { cwd, stdio: "ignore" }); } catch {}
     try {
       execSync('git -c user.name="' + this.authorName + '" -c user.email="' + this.authorEmail + '" commit -m "' + this.commitMessage + '" --allow-empty', { cwd, stdio: "ignore" });
@@ -2437,6 +2462,10 @@ class GitStorageAdapter {
   async persist() {
     if (typeof this.inner.persist === "function") await this.inner.persist();
     if (!this._dirty) return;
+    if (this.batchIntervalMs > 0 && this._timer) {
+      // Batch mode: commit will fire when timer expires
+      return;
+    }
     this._doCommit();
   }
 }

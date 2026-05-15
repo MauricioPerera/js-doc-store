@@ -477,10 +477,11 @@ server.tool("schema_update", "Update documents in a schema collection matching a
 
   const colName = args.prefix ? args.prefix + args.collectionName : args.collectionName;
   const col = db.collection(colName);
-  col.update(args.filter, args.update);
+  const ids = col.find(args.filter).toArray().map(d => d._id);
+  const updatedCount = col.updateMany(args.filter, args.update);
   await flushDB(db);
-  const updated = col.find(args.filter).toArray();
-  return { content: [{ type: "text", text: JSON.stringify({ updatedCount: updated.length, collection: colName, docs: updated }, null, 2) }] };
+  const docs = ids.length ? col.find({ _id: { $in: ids } }).toArray() : [];
+  return { content: [{ type: "text", text: JSON.stringify({ updatedCount, collection: colName, docs }, null, 2) }] };
 });
 
 server.tool("schema_delete", "Delete documents in a schema collection matching a filter. Use when user says delete, remove, drop, or clear. Use { _id: specificId } for single-document deletion. ALWAYS confirm with the user if more than one document matches the filter.", {
@@ -756,7 +757,7 @@ server.tool("secure_delete", "Permanently delete documents. If GIT_STORAGE is ac
   const col = db.collection(colName);
   const docs = col.find(args.filter).toArray();
   const ids = docs.map(d => d._id);
-  col.remove(args.filter);
+  const deletedCount = col.removeMany(args.filter);
   await flushDB(db);
 
   let gitPurged = false;
@@ -773,7 +774,7 @@ server.tool("secure_delete", "Permanently delete documents. If GIT_STORAGE is ac
   }
 
   await logAudit("secure_delete", { schemaName: args.schemaName, collectionName: args.collectionName, ids }, args.authToken);
-  return { content: [{ type: "text", text: JSON.stringify({ deletedCount: ids.length, ids, gitPurged, collection: colName, note: "For full GDPR history purge, run git filter-repo --strip-blobs-bigger-than 1M" }, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify({ deletedCount, ids, gitPurged, collection: colName, note: "For full GDPR history purge, run git filter-repo --strip-blobs-bigger-than 1M" }, null, 2) }] };
 });
 
 server.tool("field_encrypt", "[REQUIRES ENCRYPTION_KEY env var on the MCP server; admin role if AUTH_SECRET is set] Encrypt a field value before storing it. Use when the schema has encrypted:true or when user requests field-level encryption for sensitive data.", {

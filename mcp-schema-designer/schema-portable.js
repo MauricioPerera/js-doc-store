@@ -37,7 +37,7 @@ function importSchema(db, exportData, options = {}) {
     if (!options.force) {
       throw new Error(`Schema ${exportData.name} already exists. Use force=true to overwrite.`);
     }
-    schemas.update({ name: exportData.name }, { $_set: { collections: exportData.collections.map(c => c.definition), description: exportData.description, updatedAt: new Date().toISOString() } });
+    schemas.update({ name: exportData.name }, { $set: { collections: exportData.collections.map(c => c.definition), description: exportData.description, updatedAt: new Date().toISOString() } });
   } else {
     schemas.insert({ name: exportData.name, description: exportData.description, collections: exportData.collections.map(c => c.definition), createdAt: new Date().toISOString() });
   }

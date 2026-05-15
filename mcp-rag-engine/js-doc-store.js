@@ -184,7 +184,7 @@ function applyUpdate(doc, update) {
         break;
 
       default:
-        // Si no tiene operador, tratar como reemplazo completo (excepto _id)
+        // Si no tiene operador, mergea parcialmente (preserva campos no mencionados, excepto _id)
         if (!op.startsWith('$')) {
           const id = result._id;
           Object.assign(result, update);
@@ -2449,11 +2449,11 @@ class GitStorageAdapter {
     this._ensureGitignore(cwd);
     try { execSync("git add -A", { cwd, stdio: "ignore" }); } catch {}
     try {
-      execSync('git -c user.name="' + this.authorName + '" -c user.email="' + this.authorEmail + '" commit -m "' + this.commitMessage + '" --allow-empty', { cwd, stdio: "ignore" });
+      execFileSync('git', ['-c', 'user.name=' + this.authorName, '-c', 'user.email=' + this.authorEmail, 'commit', '-m', this.commitMessage, '--allow-empty'], { cwd, stdio: 'ignore' });
     } catch {}
     if (this.autoPush) {
       try {
-        execSync('git push "' + this.pushRemote + '" "' + this.pushBranch + '"', { cwd, stdio: "ignore" });
+        execFileSync('git', ['push', this.pushRemote, this.pushBranch], { cwd, stdio: 'ignore' });
       } catch {}
     }
     this._dirty = false;

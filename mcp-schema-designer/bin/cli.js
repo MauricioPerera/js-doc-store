@@ -14,7 +14,6 @@ function showHelp() {
   console.log('  api:basic     Start the basic REST API server (no auth)');
   console.log('  api:prod      Start the production API server (auto-imports exports/)');
   console.log('  mcp           Start the MCP Schema Designer server');
-  console.log('  mcp:memory    Start the MCP Memory server');
   console.log('  list          List defined schemas in the local database');
   console.log('  export        Export a schema to a portable JSON file');
   console.log('  import        Import a schema from a portable JSON file');
@@ -62,8 +61,6 @@ if (command === 'api') {
   require(path.join(serverDir, 'schema-api-prod.js'));
 } else if (command === 'mcp') {
   require(path.join(serverDir, 'schema-designer-server.js'));
-} else if (command === 'mcp:memory') {
-  require(path.join(serverDir, 'mcp-memory-server.js'));
 } else if (command === 'list') {
   const { DocStore, FileStorageAdapter } = require(path.join(serverDir, 'js-doc-store.js'));
   const db = new DocStore(new FileStorageAdapter(dataDir));

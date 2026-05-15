@@ -99,7 +99,6 @@ async function requireAuth(token, requiredRole) {
 }
 
 async function flushDB(db) {
-  await flushDB(db);
   const adapter = db._adapter || (db._collections && db._collections.values().next().value?._adapter);
   if (adapter && typeof adapter.persist === 'function') {
     await adapter.persist();
@@ -177,7 +176,7 @@ function buildSchemaSkill(schema) {
     for (const f of (col.fields || [])) {
       if (f.type === "string") q[f.name] = "value";
       else if (f.type === "boolean") q[f.name] = true;
-      else if (f.type === "number") q[f.name] = { $_gte: 0 };
+      else if (f.type === "number") q[f.name] = { $gte: 0 };
       break;
     }
     lines.push(`### ${col.name}`);
@@ -194,7 +193,7 @@ function buildSchemaSkill(schema) {
   lines.push("## Usage Patterns");
   lines.push("1. Insert: use schema_insert with schemaName, collectionName, and doc.");
   lines.push("2. Query: use schema_query with filter, sort, limit, skip.");
-  lines.push("3. Update: use schema_update with filter and update ($_set, $_unset).");
+  lines.push("3. Update: use schema_update with filter and update ($set, $unset).");
   lines.push("4. Delete: use schema_delete with filter.");
   lines.push("5. Seed: use schema_seed to generate sample data for testing.");
   lines.push("");
@@ -232,12 +231,12 @@ function buildUsageGuide() {
 
 ### schema_query
 - Use when user asks "show", "list", "find", "get", "search"
-- Supports MongoDB-style filters: { status: "active", priority: { $_gte: 5 } }
+- Supports MongoDB-style filters: { status: "active", priority: { $gte: 5 } }
 - Use __sort, __limit, __skip for pagination
 
 ### schema_update
 - Use when user says "change", "update", "set", "mark as done"
-- Update format: { $_set: { field: value } }
+- Update format: { $set: { field: value } }
 
 ### schema_delete
 - Use when user says "delete", "remove", "drop", "clear"
@@ -256,9 +255,9 @@ function buildUsageGuide() {
 
 ## Query Tips
 - Filter by exact match: { status: "published" }
-- Filter by comparison: { priority: { $_gte: 5 } }
+- Filter by comparison: { priority: { $gte: 5 } }
 - Filter by regex: { title: { $_regex: "hello" } }
-- Combine with $_and: { $_and: [ { status: "active" }, { priority: { $_gte: 5 } } ] }
+- Combine with $_and: { $_and: [ { status: "active" }, { priority: { $gte: 5 } } ] }
 - Sort: { createdAt: -1 } for newest first
 - Pagination: limit 10, skip 0 for page 1; limit 10, skip 10 for page 2
 `;
@@ -288,7 +287,7 @@ server.tool("schema_define", "Define a NEW database architecture. ONLY use when 
   const schemas = db.collection("__schemas");
   const existing = schemas.findOne({ name: args.name });
   if (existing) {
-    schemas.update({ name: args.name }, { $_set: { collections: args.collections, description: args.description, updatedAt: new Date().toISOString() } });
+    schemas.update({ name: args.name }, { $set: { collections: args.collections, description: args.description, updatedAt: new Date().toISOString() } });
   } else {
     schemas.insert({ name: args.name, description: args.description, collections: args.collections, encrypted: args.encrypted || false, createdAt: new Date().toISOString() });
   }
@@ -358,7 +357,7 @@ server.tool("schema_list", "List all defined database architectures. Returns eac
   const db = await getDB();
   const schemas = db.collection("__schemas");
   let cursor = schemas.find({});
-  if (args.name) cursor = schemas.find({ name: { $_regex: args.name } });
+  if (args.name) cursor = schemas.find({ name: { $regex: args.name } });
   const results = cursor.toArray();
   const skills = results.map(s => ({
     name: s.name,
@@ -405,7 +404,7 @@ server.tool("schema_query", "Search/query documents in a schema collection. Use 
   schemaName: z.string().describe("Schema name."),
   collectionName: z.string().describe("Collection name (without prefix)."),
   prefix: z.string().optional(),
-  filter: z.record(z.any()).optional().describe("MongoDB-style query filter. Examples: {} = all; { status: active } = exact match; { priority: { $_gte: 5 } } = comparison; { title: { $_regex: hello } } = search. Default {} returns all documents."),
+  filter: z.record(z.any()).optional().describe("MongoDB-style query filter. Examples: {} = all; { status: active } = exact match; { priority: { $gte: 5 } } = comparison; { title: { $regex: hello } } = search. Default {} returns all documents."),
   sort: z.record(z.any()).optional().describe("Sort specification. Example: { createdAt: -1 } for newest first."),
   limit: z.number().optional().describe("Max documents to return. Default: all."),
   skip: z.number().optional().describe("Documents to skip for pagination. Example: skip 0 for page 1, skip 10 for page 2 with limit 10.")
@@ -428,12 +427,12 @@ server.tool("schema_query", "Search/query documents in a schema collection. Use 
   return { content: [{ type: "text", text: JSON.stringify({ queried: results.length, collection: colName, docs: results }, null, 2) }] };
 });
 
-server.tool("schema_update", "Update documents in a schema collection matching a filter. Use when user says change, update, set, mark, edit, or modify. Update format uses MongoDB operators: { $_set: { field: value } }.", {
+server.tool("schema_update", "Update documents in a schema collection matching a filter. Use when user says change, update, set, mark, edit, or modify. Update format uses MongoDB operators: { $set: { field: value } }.", {
   schemaName: z.string().describe("Schema name."),
   collectionName: z.string().describe("Collection name (without prefix)."),
   prefix: z.string().optional(),
   filter: z.record(z.any()).describe("Filter to match documents to update. Use { _id: specificId } to update a single document."),
-  update: z.record(z.any()).describe("Update object using MongoDB operators. Examples: { $_set: { status: done } } sets a field; { $_inc: { views: 1 } } increments; { $_unset: { tempField: 1 } } removes a field.")
+  update: z.record(z.any()).describe("Update object using MongoDB operators. Examples: { $set: { status: done } } sets a field; { $inc: { views: 1 } } increments; { $unset: { tempField: 1 } } removes a field.")
 }, async (args) => {
   const db = await getDB();
   const schemas = db.collection("__schemas");

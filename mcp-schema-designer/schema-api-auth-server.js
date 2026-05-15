@@ -45,6 +45,8 @@ function parseFilter(query) {
   const filter = {};
   for (const [key, val] of Object.entries(query)) {
     if (key.startsWith("__")) continue;
+    if (Array.isArray(val)) { filter[key] = { $in: val }; continue; }
+    if (typeof val !== "string") { filter[key] = val; continue; }
     if (val.startsWith("{") && val.endsWith("}")) {
       try { filter[key] = JSON.parse(val); continue; } catch(e) {}
     }

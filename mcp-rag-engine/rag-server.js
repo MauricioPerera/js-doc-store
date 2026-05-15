@@ -143,10 +143,18 @@ async function getVectorStore(name, dim = 768) {
 }
 
 async function persistDocStore(db) {
-  await persistDocStore(db);
   const adapter = db._adapter;
   if (adapter && typeof adapter.persist === 'function') {
     await adapter.persist();
+  }
+  // Persist BM25 indexes
+  for (const [name, bm25] of bm25s) {
+    try {
+      const vStore = vectorStores.get(name);
+      if (vStore && vStore._adapter && typeof vStore._adapter.writeJson === 'function') {
+        vStore._adapter.writeJson(name + ".bm25.json", bm25.exportState(name));
+      }
+    } catch {}
   }
 }
 

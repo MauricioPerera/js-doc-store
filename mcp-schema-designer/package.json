@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "js-doc-store-headless",
   "version": "1.0.0",
   "description": "Headless CMS API powered by js-doc-store. Zero-dependency document database with MongoDB-style queries, JWT auth, dynamic schema generation, and portable deploy packages.",
@@ -45,7 +45,6 @@
     "schema-api-server.js",
     "schema-api-prod.js",
     "schema-portable.js",
-    "mcp-memory-server.js",
     "demo-schema-designer.js",
     "demo-crud.js",
     "demo-export-import.js",

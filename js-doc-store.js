@@ -1735,7 +1735,7 @@ class EncryptedAdapter {
     if (!this._binCache) this._binCache = new Map();
     const magic = EncryptedAdapter._BIN_MAGIC;
     for (const f of filenames) {
-      const raw = this.inner.readBin(f);
+      const raw = typeof this.inner.readBin === 'function' ? this.inner.readBin(f) : null;
       if (raw) {
         const u8 = new Uint8Array(raw);
         const isEncrypted = u8.length > magic.length &&
@@ -1803,6 +1803,7 @@ class EncryptedAdapter {
       }
       return cached;
     }
+    if (typeof this.inner.readBin !== 'function') return null;
     const raw = this.inner.readBin(filename);
     if (!raw) return null;
     const magic = EncryptedAdapter._BIN_MAGIC;
@@ -1833,7 +1834,7 @@ class EncryptedAdapter {
       }
       this._pending.clear();
     }
-    if (this._binPending) {
+    if (this._binPending && typeof this.inner.writeBin === 'function') {
       for (const [filename, buffer] of this._binPending) {
         const encrypted = await this._encryptBin(buffer);
         this.inner.writeBin(filename, encrypted);

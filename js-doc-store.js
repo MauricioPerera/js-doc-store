@@ -2316,8 +2316,31 @@ class GitStorageAdapter {
     this.commitMessage = opts.commitMessage || "Auto-commit: data update";
     this.authorName = opts.authorName || "js-doc-store";
     this.authorEmail = opts.authorEmail || "bot@js-doc-store.local";
+    this.autoPush = opts.autoPush || false;
+    this.pushRemote = opts.pushRemote || "origin";
+    this.pushBranch = opts.pushBranch || "master";
+    this.batchIntervalMs = opts.batchIntervalMs || 0;
     this._dirty = false;
     this._cp = null;
+    this._timer = null;
+    this._shuttingDown = false;
+    this._initShutdownHook();
+  }
+
+  _initShutdownHook() {
+    if (typeof process !== "undefined" && process.on) {
+      const flush = () => {
+        if (this._dirty && !this._shuttingDown) {
+          this._shuttingDown = true;
+          try {
+            this._doCommit();
+          } catch {}
+        }
+      };
+      process.on("exit", flush);
+      process.on("SIGINT", () => { flush(); process.exit(0); });
+      process.on("SIGTERM", () => { flush(); process.exit(0); });
+    }
   }
 
   _getCp() {
@@ -2348,6 +2371,7 @@ class GitStorageAdapter {
 
   writeJson(filename, data) {
     this._dirty = true;
+    this._scheduleBatchCommit();
     return this.inner.writeJson(filename, data);
   }
 
@@ -2358,12 +2382,14 @@ class GitStorageAdapter {
 
   writeBin(filename, buffer) {
     this._dirty = true;
+    this._scheduleBatchCommit();
     if (typeof this.inner.writeBin === "function") return this.inner.writeBin(filename, buffer);
     throw new Error("GitStorageAdapter: inner adapter does not support writeBin");
   }
 
   delete(filename) {
     this._dirty = true;
+    this._scheduleBatchCommit();
     return this.inner.delete(filename);
   }
 
@@ -2380,9 +2406,17 @@ class GitStorageAdapter {
     if (typeof this.inner.preloadAll === "function") await this.inner.preloadAll();
   }
 
-  async persist() {
-    if (typeof this.inner.persist === "function") await this.inner.persist();
-    if (!this._dirty) return;
+  _scheduleBatchCommit() {
+    if (this.batchIntervalMs <= 0 || this._timer) return;
+    this._timer = setTimeout(() => {
+      this._timer = null;
+      if (this._dirty) {
+        this.persist().catch(() => {});
+      }
+    }, this.batchIntervalMs);
+  }
+
+  _doCommit() {
     const { execSync } = this._getCp();
     const cwd = this.repoPath;
     if (!this._isGitRepo(cwd)) {
@@ -2392,7 +2426,18 @@ class GitStorageAdapter {
     try {
       execSync('git -c user.name="' + this.authorName + '" -c user.email="' + this.authorEmail + '" commit -m "' + this.commitMessage + '" --allow-empty', { cwd, stdio: "ignore" });
     } catch {}
+    if (this.autoPush) {
+      try {
+        execSync('git push "' + this.pushRemote + '" "' + this.pushBranch + '"', { cwd, stdio: "ignore" });
+      } catch {}
+    }
     this._dirty = false;
+  }
+
+  async persist() {
+    if (typeof this.inner.persist === "function") await this.inner.persist();
+    if (!this._dirty) return;
+    this._doCommit();
   }
 }
 

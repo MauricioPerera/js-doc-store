@@ -1,0 +1,37 @@
+﻿{
+  "name": "js-doc-store-rag",
+  "version": "1.0.0",
+  "description": "RAG engine combining js-doc-store (structured documents) and js-vector-store (semantic search with Ollama embeddings). Hybrid search + structured filtering for Retrieval-Augmented Generation.",
+  "main": "rag-api-server.js",
+  "bin": {
+    "js-doc-store-rag": "./bin/cli.js"
+  },
+  "scripts": {
+    "start": "node rag-api-server.js",
+    "start:mcp": "node rag-server.js"
+  },
+  "keywords": [
+    "rag",
+    "retrieval-augmented-generation",
+    "semantic-search",
+    "vector-search",
+    "ollama",
+    "embeddings",
+    "hybrid-search",
+    "mcp",
+    "headless"
+  ],
+  "author": "MauricioPerera",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MauricioPerera/js-doc-store"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.0.0"
+  }
+}

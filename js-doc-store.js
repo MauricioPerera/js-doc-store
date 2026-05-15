@@ -1699,6 +1699,30 @@ class EncryptedAdapter {
     return JSON.parse(dec.decode(plaintext));
   }
 
+  // Binary magic header: "ENC\x01" — marks encrypted binary files written by EncryptedAdapter
+  static get _BIN_MAGIC() { return new Uint8Array([0x45, 0x4E, 0x43, 0x01]); }
+
+  async _encryptBin(buffer) {
+    const crypto = EncryptedAdapter._getCrypto();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this._key, buffer);
+    const magic = EncryptedAdapter._BIN_MAGIC;
+    const result = new Uint8Array(magic.length + 12 + ciphertext.byteLength);
+    result.set(magic);
+    result.set(iv, magic.length);
+    result.set(new Uint8Array(ciphertext), magic.length + 12);
+    return result.buffer;
+  }
+
+  async _decryptBin(buffer) {
+    const crypto = EncryptedAdapter._getCrypto();
+    const magic = EncryptedAdapter._BIN_MAGIC;
+    const u8 = new Uint8Array(buffer, magic.length);
+    const iv = u8.slice(0, 12);
+    const ciphertext = u8.slice(12);
+    return await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this._key, ciphertext);
+  }
+
   // ── Sync interface (con cache para operaciones sync) ─────
 
   /**
@@ -1708,7 +1732,21 @@ class EncryptedAdapter {
    */
   async preload(filenames) {
     if (!this._cache) this._cache = new Map();
+    if (!this._binCache) this._binCache = new Map();
+    const magic = EncryptedAdapter._BIN_MAGIC;
     for (const f of filenames) {
+      const raw = this.inner.readBin(f);
+      if (raw) {
+        const u8 = new Uint8Array(raw);
+        const isEncrypted = u8.length > magic.length &&
+          magic.every((b, i) => u8[i] === b);
+        try {
+          this._binCache.set(f, isEncrypted ? await this._decryptBin(raw) : raw);
+        } catch (err) {
+          this._binCache.set(f, { __decryptFailed: true, file: f, error: err?.message ?? String(err) });
+        }
+        continue;
+      }
       const encrypted = this.inner.readJson(f);
       if (encrypted && encrypted.__enc) {
         try {
@@ -1752,15 +1790,34 @@ class EncryptedAdapter {
   delete(filename) {
     if (this._cache) this._cache.delete(filename);
     if (this._pending) this._pending.delete(filename);
+    if (this._binCache) this._binCache.delete(filename);
+    if (this._binPending) this._binPending.delete(filename);
     this.inner.delete(filename);
   }
 
   readBin(filename) {
-    return this.inner.readBin(filename);
+    if (this._binCache && this._binCache.has(filename)) {
+      const cached = this._binCache.get(filename);
+      if (cached && cached.__decryptFailed) {
+        throw new Error(`Decryption failed for binary ${cached.file}: wrong key or corrupted data`);
+      }
+      return cached;
+    }
+    const raw = this.inner.readBin(filename);
+    if (!raw) return null;
+    const magic = EncryptedAdapter._BIN_MAGIC;
+    const u8 = new Uint8Array(raw);
+    if (u8.length > magic.length && magic.every((b, i) => u8[i] === b)) {
+      throw new Error(`Encrypted binary found in ${filename} but no decryption cache available (call preload first)`);
+    }
+    return raw;
   }
 
   writeBin(filename, buffer) {
-    this.inner.writeBin(filename, buffer);
+    if (!this._binPending) this._binPending = new Map();
+    if (!this._binCache) this._binCache = new Map();
+    this._binPending.set(filename, buffer);
+    this._binCache.set(filename, buffer);
   }
 
   /**
@@ -1768,12 +1825,21 @@ class EncryptedAdapter {
    * Llamar despues de db.flush().
    */
   async persist() {
-    if (!this._pending) return;
-    for (const [filename, data] of this._pending) {
-      const encrypted = await this._encrypt(data);
-      this.inner.writeJson(filename, { __enc: encrypted });
+    if (!this._pending && !this._binPending) return;
+    if (this._pending) {
+      for (const [filename, data] of this._pending) {
+        const encrypted = await this._encrypt(data);
+        this.inner.writeJson(filename, { __enc: encrypted });
+      }
+      this._pending.clear();
     }
-    this._pending.clear();
+    if (this._binPending) {
+      for (const [filename, buffer] of this._binPending) {
+        const encrypted = await this._encryptBin(buffer);
+        this.inner.writeBin(filename, encrypted);
+      }
+      this._binPending.clear();
+    }
   }
 
   /**

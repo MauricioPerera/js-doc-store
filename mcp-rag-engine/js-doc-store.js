@@ -234,6 +234,10 @@ class FileStorageAdapter {
     const file = this.path.join(this.dir, filename);
     if (this.fs.existsSync(file)) this.fs.unlinkSync(file);
   }
+  listKeys() {
+    if (!this.fs.existsSync(this.dir)) return [];
+    return this.fs.readdirSync(this.dir);
+  }
 }
 
 class MemoryStorageAdapter {
@@ -1731,6 +1735,14 @@ class EncryptedAdapter {
     if (this._cache) this._cache.delete(filename);
     if (this._pending) this._pending.delete(filename);
     this.inner.delete(filename);
+  }
+
+  readBin(filename) {
+    return this.inner.readBin(filename);
+  }
+
+  writeBin(filename, buffer) {
+    this.inner.writeBin(filename, buffer);
   }
 
   /**

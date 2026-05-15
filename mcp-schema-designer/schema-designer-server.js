@@ -3,8 +3,49 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const z = require("zod/v4");
 const path = require("path");
 
-const { DocStore, FileStorageAdapter } = require(path.join(__dirname, "js-doc-store.js"));
-const db = new DocStore(new FileStorageAdapter(path.join(__dirname, "schema-designer-data")));
+const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto } = require(path.join(__dirname, "js-doc-store.js"));
+const DATA_DIR = path.join(__dirname, "schema-designer-data");
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
+
+let _adapter = null;
+let _db = null;
+let _fieldCrypto = null;
+
+async function getAdapter() {
+  if (_adapter) return _adapter;
+  const inner = new FileStorageAdapter(DATA_DIR);
+  if (ENCRYPTION_KEY) {
+    _adapter = await EncryptedAdapter.create(inner, ENCRYPTION_KEY);
+  } else {
+    _adapter = inner;
+  }
+  return _adapter;
+}
+
+async function getDB() {
+  if (_db) return _db;
+  const adapter = await getAdapter();
+  _db = new DocStore(adapter);
+  if (typeof adapter.preloadAll === 'function') {
+    try { await adapter.preloadAll(); } catch (e) { /* first run or plain */ }
+  }
+  return _db;
+}
+
+async function getFieldCrypto() {
+  if (_fieldCrypto) return _fieldCrypto;
+  if (!ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY not set');
+  _fieldCrypto = await FieldCrypto.create(ENCRYPTION_KEY);
+  return _fieldCrypto;
+}
+
+async function flushDB(db) {
+  await flushDB(db);
+  const adapter = db._adapter || (db._collections && db._collections.values().next().value?._adapter);
+  if (adapter && typeof adapter.persist === 'function') {
+    await adapter.persist();
+  }
+}
 
 const server = new McpServer(
   { name: "js-doc-store-schema-designer", version: "1.1.0" },
@@ -184,20 +225,22 @@ server.tool("schema_define", "Define a NEW database architecture. ONLY use when 
     })).optional().describe("Explicit indexes beyond per-field index flags.")
   })).describe("Collection definitions. Design related collections together. Use ref fields to link them.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const existing = schemas.findOne({ name: args.name });
   if (existing) {
     schemas.update({ name: args.name }, { $_set: { collections: args.collections, description: args.description, updatedAt: new Date().toISOString() } });
   } else {
-    schemas.insert({ name: args.name, description: args.description, collections: args.collections, createdAt: new Date().toISOString() });
+    schemas.insert({ name: args.name, description: args.description, collections: args.collections, encrypted: args.encrypted || false, createdAt: new Date().toISOString() });
   }
-  db.flush();
+  await flushDB(db);
   return { content: [{ type: "text", text: JSON.stringify({ defined: args.name, collections: args.collections.map(c => c.name), nextStep: "Call schema_instantiate to create collections" }, null, 2) }] };
 });
 
 server.tool("schema_exists", "Check if a schema exists. ALWAYS call this FIRST before any schema operation. Returns full architecture context (skill) when found so you know how to query and insert data correctly.", {
   name: z.string().describe("Schema name to check, e.g. blog_cms, task_manager.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.name });
   if (!schema) {
@@ -224,6 +267,7 @@ server.tool("schema_instantiate", "Create actual database collections and indexe
   schemaName: z.string().describe("Name of the schema to materialize."),
   prefix: z.string().optional().describe("Optional prefix for collection names, e.g. acme_. Use when deploying multiple instances of the same schema.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.schemaName });
   if (!schema) throw new Error(`Schema ${args.schemaName} not found`);
@@ -245,13 +289,14 @@ server.tool("schema_instantiate", "Create actual database collections and indexe
     }
     created.push(colName);
   }
-  db.flush();
+  await flushDB(db);
   return { content: [{ type: "text", text: JSON.stringify({ instantiated: args.schemaName, collectionsCreated: created, ready: true }, null, 2) }] };
 });
 
 server.tool("schema_list", "List all defined database architectures. Returns each schema as a skill with full architecture context, sample documents, query examples, and usage patterns. Use when user asks what schemas exist or wants to browse available databases.", {
   name: z.string().optional().describe("Optional filter by schema name substring. Use when user mentions a partial name like blog or cms.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   let cursor = schemas.find({});
   if (args.name) cursor = schemas.find({ name: { $_regex: args.name } });
@@ -272,6 +317,7 @@ server.tool("schema_insert", "Insert a new document into a schema collection. Va
   prefix: z.string().optional(),
   doc: z.record(z.any()).describe("Document to insert. Must satisfy required fields. Use schema_exists skillContext to see expected fields and sample documents.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.schemaName });
   if (!schema) throw new Error(`Schema not found: ${args.schemaName}. Use schema_exists first.`);
@@ -292,7 +338,7 @@ server.tool("schema_insert", "Insert a new document into a schema collection. Va
   const colName = args.prefix ? args.prefix + args.collectionName : args.collectionName;
   const col = db.collection(colName);
   const inserted = col.insert(args.doc);
-  db.flush();
+  await flushDB(db);
   return { content: [{ type: "text", text: JSON.stringify({ inserted, collection: colName }, null, 2) }] };
 });
 
@@ -305,6 +351,7 @@ server.tool("schema_query", "Search/query documents in a schema collection. Use 
   limit: z.number().optional().describe("Max documents to return. Default: all."),
   skip: z.number().optional().describe("Documents to skip for pagination. Example: skip 0 for page 1, skip 10 for page 2 with limit 10.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.schemaName });
   if (!schema) throw new Error(`Schema not found: ${args.schemaName}`);
@@ -329,6 +376,7 @@ server.tool("schema_update", "Update documents in a schema collection matching a
   filter: z.record(z.any()).describe("Filter to match documents to update. Use { _id: specificId } to update a single document."),
   update: z.record(z.any()).describe("Update object using MongoDB operators. Examples: { $_set: { status: done } } sets a field; { $_inc: { views: 1 } } increments; { $_unset: { tempField: 1 } } removes a field.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.schemaName });
   if (!schema) throw new Error(`Schema not found: ${args.schemaName}`);
@@ -339,7 +387,7 @@ server.tool("schema_update", "Update documents in a schema collection matching a
   const colName = args.prefix ? args.prefix + args.collectionName : args.collectionName;
   const col = db.collection(colName);
   col.update(args.filter, args.update);
-  db.flush();
+  await flushDB(db);
   const updated = col.find(args.filter).toArray();
   return { content: [{ type: "text", text: JSON.stringify({ updatedCount: updated.length, collection: colName, docs: updated }, null, 2) }] };
 });
@@ -350,6 +398,7 @@ server.tool("schema_delete", "Delete documents in a schema collection matching a
   prefix: z.string().optional(),
   filter: z.record(z.any()).describe("Filter to match documents to delete. Use { _id: specificId } for a single document. Use broader filters only after user confirmation.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.schemaName });
   if (!schema) throw new Error(`Schema not found: ${args.schemaName}`);
@@ -361,7 +410,7 @@ server.tool("schema_delete", "Delete documents in a schema collection matching a
   const col = db.collection(colName);
   const before = col.find(args.filter).count();
   col.remove(args.filter);
-  db.flush();
+  await flushDB(db);
   return { content: [{ type: "text", text: JSON.stringify({ deletedCount: before, collection: colName, filter: args.filter }, null, 2) }] };
 });
 
@@ -371,6 +420,7 @@ server.tool("schema_seed", "Generate sample documents for a schema collection. U
   prefix: z.string().optional(),
   count: z.number().min(1).max(50).default(5).describe("Number of sample documents to generate. Max 50.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.schemaName });
   if (!schema) throw new Error(`Schema not found: ${args.schemaName}`);
@@ -400,7 +450,7 @@ server.tool("schema_seed", "Generate sample documents for a schema collection. U
     }
     inserted.push(col.insert(doc));
   }
-  db.flush();
+  await flushDB(db);
   return { content: [{ type: "text", text: JSON.stringify({ seeded: inserted.length, collection: colName, docs: inserted }, null, 2) }] };
 });
 
@@ -408,6 +458,7 @@ server.tool("schema_export", "Export a schema and all its data to a portable JSO
   schemaName: z.string().describe("Schema to export."),
   includeData: z.boolean().default(true).describe("If true, includes all documents. If false, exports schema definition only.")
 }, async (args) => {
+  const db = await getDB();
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.schemaName });
   if (!schema) throw new Error(`Schema not found: ${args.schemaName}`);
@@ -440,8 +491,27 @@ server.tool("schema_export", "Export a schema and all its data to a portable JSO
   return { content: [{ type: "text", text: JSON.stringify({ exported: args.schemaName, filePath, includeData: args.includeData, collections: exportData.collections.map(c => ({ name: c.name, documentCount: c.documentCount })) }, null, 2) }] };
 });
 
+
+server.tool("field_encrypt", "Encrypt a field value before storing it. Use when the schema has encrypted:true or when user requests field-level encryption for sensitive data.", {
+  value: z.string().describe("Value to encrypt."),
+  fieldName: z.string().optional().describe("Field name for context.")
+}, async (args) => {
+  const crypto = await getFieldCrypto();
+  const encrypted = await crypto.encrypt(args.value);
+  return { content: [{ type: "text", text: JSON.stringify({ encrypted, field: args.fieldName }, null, 2) }] };
+});
+
+server.tool("field_decrypt", "Decrypt a field value after reading it from the database. Use when retrieving documents that contain encrypted fields.", {
+  encrypted: z.string().describe("Encrypted string from the database."),
+  fieldName: z.string().optional().describe("Field name for context.")
+}, async (args) => {
+  const crypto = await getFieldCrypto();
+  const decrypted = await crypto.decrypt(args.encrypted);
+  return { content: [{ type: "text", text: JSON.stringify({ decrypted, field: args.fieldName }, null, 2) }] };
+});
+
 const transport = new StdioServerTransport();
 server.connect(transport).then(() => {
   console.error("Schema Designer MCP Server started on stdio");
-  console.error("Tools: schema_exists, schema_define, schema_instantiate, schema_insert, schema_query, schema_update, schema_delete, schema_seed, schema_list, schema_export, schema_usage_guide");
+  console.error("Tools: schema_exists, schema_define, schema_instantiate, schema_insert, schema_query, schema_update, schema_delete, schema_seed, schema_list, schema_export, schema_usage_guide, field_encrypt, field_decrypt");
 });

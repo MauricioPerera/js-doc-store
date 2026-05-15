@@ -90,3 +90,10 @@ Cuando el contenido esta listo:
 | schema_list | Listar todos los esquemas |
 | schema_export | Exportar a JSON portable |
 | schema_usage_guide | Obtener guia completa de uso |
+
+## Encriptacion
+
+- Activa encriptacion global con la variable de entorno ENCRYPTION_KEY. Si esta configurada, todo el storage se encripta con AES-256-GCM via PBKDF2.
+- Para encriptacion a nivel de campo (por ejemplo, SSN, emails sensibles), usa ield_encrypt antes de insertar y ield_decrypt despues de leer.
+- schema_define acepta encrypted: true para marcar el esquema como sensible (metadata; la encriptacion real depende de ENCRYPTION_KEY).
+

@@ -60,6 +60,13 @@ Puedes filtrar por cualquier campo de metadata ANTES de la busqueda semantica:
 - Dimension: 768
 - Override via OLLAMA_MODEL y OLLAMA_HOST
 
+
+## Encriptacion
+
+- Activa encriptacion global con la variable de entorno ENCRYPTION_KEY. El doc-store (documentos y metadata estructurada) se encripta con AES-256-GCM via PBKDF2. La metadata JSON del vector-store tambien se encripta; los vectores binarios permanecen sin encriptar por rendimiento.
+- 
+ag_collection_setup acepta encrypted: true para marcar la coleccion como sensible.
+
 ## Limitaciones
 
 - Requiere Ollama corriendo para generar embeddings

@@ -3,7 +3,7 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const z = require("zod/v4");
 const path = require("path");
 
-const { DocStore, FileStorageAdapter } = require(path.join(__dirname, "js-doc-store.js"));
+const { DocStore, FileStorageAdapter, EncryptedAdapter } = require(path.join(__dirname, "js-doc-store.js"));
 const { VectorStore, BM25Index, HybridSearch, MemoryStorageAdapter } = require(path.join(__dirname, "js-vector-store.js"));
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
@@ -28,19 +28,52 @@ async function generateEmbedding(text) {
 const docStores = new Map();
 const vectorStores = new Map();
 const bm25s = new Map();
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
 
-function getDocStore(name) {
-  if (!docStores.has(name)) {
-    docStores.set(name, new DocStore(new FileStorageAdapter(path.join(DATA_DIR, name))));
+async function getDocStore(name) {
+  if (docStores.has(name)) return docStores.get(name);
+  const inner = new FileStorageAdapter(path.join(DATA_DIR, name));
+  let adapter = inner;
+  if (ENCRYPTION_KEY) {
+    adapter = await EncryptedAdapter.create(inner, ENCRYPTION_KEY);
   }
-  return docStores.get(name);
+  const db = new DocStore(adapter);
+  if (typeof adapter.preloadAll === 'function') {
+    try { await adapter.preloadAll(); } catch (e) { /* first run or plain */ }
+  }
+  docStores.set(name, db);
+  return db;
 }
 
-function getVectorStore(name, dim = 768) {
-  if (!vectorStores.has(name)) {
-    vectorStores.set(name, new VectorStore(new FileStorageAdapter(path.join(VECTOR_DIR, name)), dim));
+async function getVectorStore(name, dim = 768) {
+  if (vectorStores.has(name)) return vectorStores.get(name);
+  const inner = new FileStorageAdapter(path.join(VECTOR_DIR, name));
+  let adapter = inner;
+  if (ENCRYPTION_KEY) {
+    adapter = await EncryptedAdapter.create(inner, ENCRYPTION_KEY);
   }
-  return vectorStores.get(name);
+  const store = new VectorStore(adapter, dim);
+  if (typeof adapter.preloadAll === 'function') {
+    try { await adapter.preloadAll(); } catch (e) { /* first run or plain */ }
+  }
+  vectorStores.set(name, store);
+  return store;
+}
+
+async function persistDocStore(db) {
+  await persistDocStore(db);
+  const adapter = db._adapter;
+  if (adapter && typeof adapter.persist === 'function') {
+    await adapter.persist();
+  }
+}
+
+async function persistVectorStore(store) {
+  store.flush();
+  const adapter = store._adapter;
+  if (adapter && typeof adapter.persist === 'function') {
+    await adapter.persist();
+  }
 }
 
 function getBM25(name) {
@@ -58,13 +91,14 @@ server.tool("rag_collection_setup", "Create a dual collection: structured docume
     unique: z.boolean().optional(),
     default: z.any().optional()
   })).describe("Schema fields. MUST include: title (string), content (string, the full text for embedding), source (string, optional), tags (array, optional), createdAt (date)."),
-  dimension: z.number().min(64).max(4096).default(768).describe("Embedding dimension. Must match your Ollama model. embeddinggemma = 768.")
+  dimension: z.number().min(64).max(4096).default(768).describe("Embedding dimension. Must match your Ollama model. embeddinggemma = 768."),
+  encrypted: z.boolean().optional().describe("If true, marks collection as encrypted (depends on ENCRYPTION_KEY env var).")
 }, async (args) => {
-  const db = getDocStore(args.name);
+  const db = await getDocStore(args.name);
   const schemas = db.collection("__schemas");
   schemas.insert({ name: args.name, description: args.description, fields: args.fields, createdAt: new Date().toISOString() });
-  db.flush();
-  getVectorStore(args.name, args.dimension);
+  await persistDocStore(db);
+  await getVectorStore(args.name, args.dimension);
   getBM25(args.name);
   return { content: [{ type: "text", text: JSON.stringify({ setup: args.name, fields: args.fields.map(f => f.name), dimension: args.dimension, engines: ["doc-store", "vector-store", "bm25"], nextStep: "Use rag_index_document to add content" }, null, 2) }] };
 });
@@ -75,7 +109,7 @@ server.tool("rag_index_document", "Index a document for RAG: stores structured m
   content: z.string().describe("Full text content. This gets embedded for semantic search AND stored in the doc-store."),
   metadata: z.record(z.any()).optional().describe("Structured metadata: { title, source, author, tags, url, category, etc. }. These fields enable structured filtering later.")
 }, async (args) => {
-  const db = getDocStore(args.collection);
+  const db = await getDocStore(args.collection);
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.collection });
   if (!schema) throw new Error(`Collection not set up. Call rag_collection_setup first.`);
@@ -83,12 +117,12 @@ server.tool("rag_index_document", "Index a document for RAG: stores structured m
   const docs = db.collection("documents");
   const docRecord = { _id: args.id, content: args.content, ...args.metadata, indexedAt: new Date().toISOString() };
   docs.insert(docRecord);
-  db.flush();
+  await persistDocStore(db);
 
   const embedding = await generateEmbedding(args.content);
-  const vStore = getVectorStore(args.collection, embedding.length);
+  const vStore = await getVectorStore(args.collection, embedding.length);
   vStore.set(args.collection, args.id, embedding, args.metadata);
-  vStore.flush();
+  await persistVectorStore(vStore);
 
   const bm25 = getBM25(args.collection);
   bm25.addDocument(args.collection, args.id, args.content);
@@ -103,8 +137,8 @@ server.tool("rag_search", "Search a RAG collection using semantic similarity (ve
   limit: z.number().min(1).max(50).default(5).describe("Max results."),
   filter: z.record(z.any()).optional().describe("Structured filter using js-doc-store queries. Example: { category: salud } or { tags: { $_in: [ai, ml] } }. Applied BEFORE vector search if doc-store filter returns IDs.")
 }, async (args) => {
-  const db = getDocStore(args.collection);
-  const vStore = getVectorStore(args.collection);
+  const db = await getDocStore(args.collection);
+  const vStore = await getVectorStore(args.collection);
   const docs = db.collection("documents");
   let candidateIds = null;
 
@@ -157,8 +191,8 @@ server.tool("rag_context_for_prompt", "Retrieve RAG context formatted for inject
   filter: z.record(z.any()).optional().describe("Structured filter via doc-store."),
   maxCharsPerChunk: z.number().min(100).max(10000).default(2000).describe("Max characters per context chunk. Truncates if longer.")
 }, async (args) => {
-  const db = getDocStore(args.collection);
-  const vStore = getVectorStore(args.collection);
+  const db = await getDocStore(args.collection);
+  const vStore = await getVectorStore(args.collection);
   const docs = db.collection("documents");
   let candidateIds = null;
   if (args.filter && Object.keys(args.filter).length > 0) {
@@ -202,13 +236,13 @@ server.tool("rag_pipeline", "Complete RAG pipeline in one call: setup (if needed
   filter: z.record(z.any()).optional().describe("Structured filter."),
   maxCharsPerChunk: z.number().min(100).max(10000).default(2000).describe("Max chars per chunk.")
 }, async (args) => {
-  const db = getDocStore(args.collection);
+  const db = await getDocStore(args.collection);
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.collection });
   if (!schema) throw new Error(`Collection ${args.collection} not set up. Call rag_collection_setup first.`);
 
   // Reuse rag_context_for_prompt logic inline
-  const vStore = getVectorStore(args.collection);
+  const vStore = await getVectorStore(args.collection);
   const docs = db.collection("documents");
   let candidateIds = null;
   if (args.filter && Object.keys(args.filter).length > 0) {
@@ -247,11 +281,11 @@ server.tool("rag_pipeline", "Complete RAG pipeline in one call: setup (if needed
 server.tool("rag_collection_info", "Get stats about a RAG collection: document count, vector count, BM25 vocabulary size, sample documents, and schema fields.", {
   collection: z.string().describe("Collection name.")
 }, async (args) => {
-  const db = getDocStore(args.collection);
+  const db = await getDocStore(args.collection);
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.collection });
   const docs = db.collection("documents");
-  const vStore = getVectorStore(args.collection);
+  const vStore = await getVectorStore(args.collection);
   const bm25 = getBM25(args.collection);
   const docIds = docs.find({}).toArray().map(d => d._id).slice(0, 10);
   return { content: [{ type: "text", text: JSON.stringify({ collection: args.collection, schema: schema ? { description: schema.description, fields: schema.fields.map(f => f.name) } : null, docCount: docs.find({}).count(), vectorCount: vStore.ids(args.collection).length, bm25Vocabulary: bm25.vocabularySize(args.collection), sampleIds: docIds }, null, 2) }] };

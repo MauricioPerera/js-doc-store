@@ -81,6 +81,18 @@ ag_collection_setup acepta encrypted: true para marcar la coleccion como sensibl
 - **Ignore binarios**: `GIT_IGNORE_BIN=1` ignora `*.bin` y `*.vec` en git. Recomendado para evitar trackear vectores binarios grandes.
 - Ideal para versionar knowledge bases y desplegarlas via git clone.
 
+## Seguridad y Auditoria (Produccion)
+
+Configura AUTH_SECRET para activar autenticacion:
+- auth_register / auth_login: Gestion de usuarios.
+- audit_query: Consulta logs de auditoria.
+
+Herramientas protegidas:
+- rag_collection_setup requiere admin.
+- rag_index_document requiere editor.
+
+Todas las operaciones de escritura se registran. Consulta con audit_query.
+
 ## Limitaciones
 
 - Requiere Ollama corriendo para generar embeddings

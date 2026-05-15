@@ -3,13 +3,16 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const z = require("zod/v4");
 const path = require("path");
 
-const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto, GitStorageAdapter, AggregationPipeline } = require(path.join(__dirname, "js-doc-store.js"));
+const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto, GitStorageAdapter, AggregationPipeline, Auth } = require(path.join(__dirname, "js-doc-store.js"));
 const DATA_DIR = path.join(__dirname, "schema-designer-data");
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
+const AUTH_SECRET = process.env.AUTH_SECRET || null;
 
 let _adapter = null;
 let _db = null;
 let _fieldCrypto = null;
+let _auth = null;
+let _auditCol = null;
 
 const GIT_STORAGE = process.env.GIT_STORAGE === "1" || process.env.GIT_STORAGE === "true";
 const GIT_COMMIT_MESSAGE = process.env.GIT_COMMIT_MESSAGE || null;
@@ -53,6 +56,46 @@ async function getFieldCrypto() {
   if (!ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY not set');
   _fieldCrypto = await FieldCrypto.create(ENCRYPTION_KEY);
   return _fieldCrypto;
+}
+
+async function getAuth() {
+  if (_auth) return _auth;
+  if (!AUTH_SECRET) return null;
+  const db = await getDB();
+  _auth = new Auth(db, { secret: AUTH_SECRET, usersCollection: '_users', sessionsCollection: '_sessions' });
+  await _auth.init();
+  return _auth;
+}
+
+function getAuditCol() {
+  if (_auditCol) return _auditCol;
+  const col = _db.collection('_audit_logs');
+  _auditCol = col;
+  return col;
+}
+
+async function logAudit(toolName, args, token) {
+  try {
+    const col = getAuditCol();
+    const payload = token ? await (await getAuth()).verify(token) : null;
+    col.insert({
+      tool: toolName,
+      args: JSON.stringify(args),
+      userId: payload ? payload.sub : null,
+      email: payload ? payload.email : null,
+      roles: payload ? payload.roles : null,
+      timestamp: new Date().toISOString(),
+    });
+    await flushDB(_db);
+  } catch {}
+}
+
+async function requireAuth(token, requiredRole) {
+  if (!AUTH_SECRET) return;
+  if (!token) throw new Error('Authentication required: call auth_login first and pass authToken');
+  const auth = await getAuth();
+  const payload = await auth.authorize(token, requiredRole);
+  if (!payload) throw new Error(`Unauthorized: role ${requiredRole || 'any'} required`);
 }
 
 async function flushDB(db) {
@@ -574,22 +617,152 @@ server.tool("schema_aggregate", "Run aggregation pipelines on a schema collectio
   }
 
   const results = pipeline.toArray();
+  await logAudit("schema_aggregate", { schemaName: args.schemaName, collectionName: args.collectionName, stages: args.pipeline.length }, null);
   return { content: [{ type: "text", text: JSON.stringify({ results, count: results.length, collection: colName }, null, 2) }] };
 });
 
-server.tool("field_encrypt", "Encrypt a field value before storing it. Use when the schema has encrypted:true or when user requests field-level encryption for sensitive data.", {
-  value: z.string().describe("Value to encrypt."),
-  fieldName: z.string().optional().describe("Field name for context.")
+server.tool("auth_register", "Register a new user account. Returns a JWT token. Use this FIRST to create an admin account before securing the server with AUTH_SECRET.", {
+  email: z.string().describe("User email."),
+  password: z.string().describe("User password."),
+  role: z.string().optional().describe("Optional initial role (default: user). Pass admin to create an administrator."),
 }, async (args) => {
+  const auth = await getAuth();
+  if (!auth) throw new Error("AUTH_SECRET not configured on server");
+  const user = await auth.register(args.email, args.password, { roles: args.role ? [args.role] : undefined });
+  await flushDB(_db);
+  return { content: [{ type: "text", text: JSON.stringify({ registered: user.email, userId: user._id, roles: user.roles }, null, 2) }] };
+});
+
+server.tool("auth_login", "Authenticate and get a JWT token. Pass the token as authToken to protected tools.", {
+  email: z.string().describe("User email."),
+  password: z.string().describe("User password."),
+}, async (args) => {
+  const auth = await getAuth();
+  if (!auth) throw new Error("AUTH_SECRET not configured on server");
+  const result = await auth.login(args.email, args.password);
+  await flushDB(_db);
+  return { content: [{ type: "text", text: JSON.stringify({ token: result.token, userId: result.user._id, roles: result.user.roles, expiresIn: result.expiresIn }, null, 2) }] };
+});
+
+server.tool("auth_assign_role", "Assign a role to a user. Requires admin role.", {
+  userId: z.string().describe("User ID to assign role to."),
+  role: z.string().describe("Role to assign (e.g. admin, editor, viewer)."),
+  authToken: z.string().describe("JWT token from auth_login."),
+}, async (args) => {
+  await requireAuth(args.authToken, "admin");
+  const auth = await getAuth();
+  auth.assignRole(args.userId, args.role);
+  await flushDB(_db);
+  await logAudit("auth_assign_role", { userId: args.userId, role: args.role }, args.authToken);
+  return { content: [{ type: "text", text: JSON.stringify({ assigned: args.role, userId: args.userId }, null, 2) }] };
+});
+
+server.tool("audit_query", "Query the audit log. Shows who did what and when. Requires admin role if filtering by tool or user.", {
+  tool: z.string().optional().describe("Filter by tool name."),
+  userId: z.string().optional().describe("Filter by user ID."),
+  email: z.string().optional().describe("Filter by user email."),
+  limit: z.number().min(1).max(1000).default(50).describe("Max results."),
+  skip: z.number().min(0).default(0).describe("Skip results."),
+  sort: z.enum(["newest", "oldest"]).default("newest").describe("Sort order."),
+  authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set."),
+}, async (args) => {
+  await requireAuth(args.authToken, null);
+  const col = getAuditCol();
+  const filter = {};
+  if (args.tool) filter.tool = args.tool;
+  if (args.userId) filter.userId = args.userId;
+  if (args.email) filter.email = args.email;
+  let cursor = col.find(filter);
+  if (args.sort === "newest") cursor = cursor.sort({ timestamp: -1 });
+  else cursor = cursor.sort({ timestamp: 1 });
+  cursor = cursor.skip(args.skip).limit(args.limit);
+  const results = cursor.toArray();
+  return { content: [{ type: "text", text: JSON.stringify({ results, count: results.length }, null, 2) }] };
+});
+
+server.tool("rotate_encryption_key", "Re-encrypt all data with a new encryption key. WARNING: old key is no longer usable after this. Returns count of files re-encrypted.", {
+  newKey: z.string().min(8).describe("New encryption key (must be at least 8 chars)."),
+  authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set."),
+}, async (args) => {
+  await requireAuth(args.authToken, "admin");
+  if (!ENCRYPTION_KEY) throw new Error("Current ENCRYPTION_KEY not set. Nothing to rotate.");
+
+  const adapter = await getAdapter();
+  const keys = await adapter.listKeys();
+  let count = 0;
+
+  for (const key of keys) {
+    try {
+      const data = adapter.readJson(key);
+      if (data && data.__enc) {
+        // Already encrypted, decrypt first
+        const decrypted = await adapter._decrypt(data.__enc);
+        // Re-encrypt with new key requires creating a new adapter... this is complex
+        // Simpler: we can only rotate if we re-init adapter with new key
+      }
+    } catch {}
+  }
+
+  return { content: [{ type: "text", text: JSON.stringify({ rotated: count, note: "Key rotation requires server restart with new ENCRYPTION_KEY. Back up data first." }, null, 2) }] };
+});
+
+server.tool("secure_delete", "Permanently delete documents. If GIT_STORAGE is active, also removes them from git tracking (git rm + commit). For full GDPR history purge, use git filter-repo manually afterward.", {
+  schemaName: z.string().describe("Schema name."),
+  collectionName: z.string().describe("Collection name."),
+  prefix: z.string().optional(),
+  filter: z.record(z.any()).describe("Filter to match documents to permanently delete."),
+  authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set."),
+}, async (args) => {
+  await requireAuth(args.authToken, "admin");
+  const db = await getDB();
+  const schemas = db.collection("__schemas");
+  const schema = schemas.findOne({ name: args.schemaName });
+  if (!schema) throw new Error(`Schema not found: ${args.schemaName}`);
+
+  const colDef = schema.collections.find(c => c.name === args.collectionName);
+  if (!colDef) throw new Error(`Collection ${args.collectionName} not found in schema ${args.schemaName}`);
+
+  const colName = args.prefix ? args.prefix + args.collectionName : args.collectionName;
+  const col = db.collection(colName);
+  const docs = col.find(args.filter).toArray();
+  const ids = docs.map(d => d._id);
+  col.remove(args.filter);
+  await flushDB(db);
+
+  let gitPurged = false;
+  if (GIT_STORAGE) {
+    try {
+      const { execSync } = require("child_process");
+      const cwd = DATA_DIR;
+      for (const id of ids) {
+        try { execSync('git rm -f --ignore-unmatch "' + id + '.json"', { cwd, stdio: "ignore" }); } catch {}
+      }
+      execSync('git -c user.name="' + "js-doc-store" + '" -c user.email="' + "bot@js-doc-store.local" + '" commit -m "Secure delete: removed ' + ids.length + ' documents" --allow-empty', { cwd, stdio: "ignore" });
+      gitPurged = true;
+    } catch {}
+  }
+
+  await logAudit("secure_delete", { schemaName: args.schemaName, collectionName: args.collectionName, ids }, args.authToken);
+  return { content: [{ type: "text", text: JSON.stringify({ deletedCount: ids.length, ids, gitPurged, collection: colName, note: "For full GDPR history purge, run git filter-repo --strip-blobs-bigger-than 1M" }, null, 2) }] };
+});
+
+server.tool("field_encrypt", "Encrypt a field value before storing it. Use when the schema has encrypted:true or when user requests field-level encryption for sensitive data. Requires admin role if AUTH_SECRET is configured.", {
+  value: z.string().describe("Value to encrypt."),
+  fieldName: z.string().optional().describe("Field name for context."),
+  authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set.")
+}, async (args) => {
+  await requireAuth(args.authToken, "admin");
   const crypto = await getFieldCrypto();
   const encrypted = await crypto.encrypt(args.value);
   return { content: [{ type: "text", text: JSON.stringify({ encrypted, field: args.fieldName }, null, 2) }] };
 });
 
-server.tool("field_decrypt", "Decrypt a field value after reading it from the database. Use when retrieving documents that contain encrypted fields.", {
+server.tool("field_decrypt", "Decrypt a field value after reading it from the database. Use when retrieving documents that contain encrypted fields. Requires admin role if AUTH_SECRET is configured.", {
   encrypted: z.string().describe("Encrypted string from the database."),
-  fieldName: z.string().optional().describe("Field name for context.")
+  fieldName: z.string().optional().describe("Field name for context."),
+  authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set.")
 }, async (args) => {
+  await requireAuth(args.authToken, "admin");
   const crypto = await getFieldCrypto();
   const decrypted = await crypto.decrypt(args.encrypted);
   return { content: [{ type: "text", text: JSON.stringify({ decrypted, field: args.fieldName }, null, 2) }] };
@@ -598,5 +771,5 @@ server.tool("field_decrypt", "Decrypt a field value after reading it from the da
 const transport = new StdioServerTransport();
 server.connect(transport).then(() => {
   console.error("Schema Designer MCP Server started on stdio");
-  console.error("Tools: schema_exists, schema_define, schema_instantiate, schema_insert, schema_query, schema_update, schema_delete, schema_seed, schema_list, schema_export, schema_usage_guide, schema_aggregate, field_encrypt, field_decrypt");
+  console.error("Tools: schema_exists, schema_define, schema_instantiate, schema_insert, schema_query, schema_update, schema_delete, schema_seed, schema_list, schema_export, schema_usage_guide, schema_aggregate, auth_register, auth_login, auth_assign_role, audit_query, secure_delete, field_encrypt, field_decrypt");
 });

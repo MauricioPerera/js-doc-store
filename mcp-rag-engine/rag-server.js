@@ -3,7 +3,7 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const z = require("zod/v4");
 const path = require("path");
 
-const { DocStore, FileStorageAdapter, EncryptedAdapter, GitStorageAdapter } = require(path.join(__dirname, "js-doc-store.js"));
+const { DocStore, FileStorageAdapter, EncryptedAdapter, GitStorageAdapter, Auth } = require(path.join(__dirname, "js-doc-store.js"));
 const { VectorStore, BM25Index, HybridSearch, MemoryStorageAdapter } = require(path.join(__dirname, "js-vector-store.js"));
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
@@ -29,6 +29,7 @@ const docStores = new Map();
 const vectorStores = new Map();
 const bm25s = new Map();
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
+const AUTH_SECRET = process.env.AUTH_SECRET || null;
 
 const GIT_STORAGE = process.env.GIT_STORAGE === "1" || process.env.GIT_STORAGE === "true";
 const GIT_COMMIT_MESSAGE = process.env.GIT_COMMIT_MESSAGE || null;
@@ -66,6 +67,53 @@ async function _wrapAdapterAsync(inner, dir) {
     adapter = new GitStorageAdapter(adapter, opts);
   }
   return adapter;
+}
+
+let _auth = null;
+let _auditCol = null;
+
+async function getAuth() {
+  if (_auth) return _auth;
+  if (!AUTH_SECRET) return null;
+  const adapter = await _wrapAdapterAsync(new FileStorageAdapter(path.join(DATA_DIR, "__auth__")), path.join(DATA_DIR, "__auth__"));
+  const db = new DocStore(adapter);
+  _auth = new Auth(db, { secret: AUTH_SECRET, usersCollection: "_users", sessionsCollection: "_sessions" });
+  await _auth.init();
+  return _auth;
+}
+
+function getAuditCol() {
+  if (_auditCol) return _auditCol;
+  const adapter = _wrapAdapterAsync(new FileStorageAdapter(path.join(DATA_DIR, "__audit__")), path.join(DATA_DIR, "__audit__"));
+  const db = new DocStore(adapter);
+  const col = db.collection("_audit_logs");
+  _auditCol = col;
+  return col;
+}
+
+async function logAudit(toolName, args, token) {
+  try {
+    const col = getAuditCol();
+    const payload = token ? await (await getAuth()).verify(token) : null;
+    col.insert({
+      tool: toolName,
+      args: JSON.stringify(args),
+      userId: payload ? payload.sub : null,
+      email: payload ? payload.email : null,
+      roles: payload ? payload.roles : null,
+      timestamp: new Date().toISOString(),
+    });
+    const db = new DocStore(new FileStorageAdapter(path.join(DATA_DIR, "__audit__")));
+    db.flush();
+  } catch {}
+}
+
+async function requireAuth(token, requiredRole) {
+  if (!AUTH_SECRET) return;
+  if (!token) throw new Error("Authentication required: call auth_login first and pass authToken");
+  const auth = await getAuth();
+  const payload = await auth.authorize(token, requiredRole);
+  if (!payload) throw new Error(`Unauthorized: role ${requiredRole || "any"} required`);
 }
 
 async function getDocStore(name) {
@@ -126,8 +174,10 @@ server.tool("rag_collection_setup", "Create a dual collection: structured docume
     default: z.any().optional()
   })).describe("Schema fields. MUST include: title (string), content (string, the full text for embedding), source (string, optional), tags (array, optional), createdAt (date)."),
   dimension: z.number().min(64).max(4096).default(768).describe("Embedding dimension. Must match your Ollama model. embeddinggemma = 768."),
-  encrypted: z.boolean().optional().describe("If true, marks collection as encrypted (depends on ENCRYPTION_KEY env var).")
+  encrypted: z.boolean().optional().describe("If true, marks collection as encrypted (depends on ENCRYPTION_KEY env var)."),
+  authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set.")
 }, async (args) => {
+  await requireAuth(args.authToken, "admin");
   const db = await getDocStore(args.name);
   const schemas = db.collection("__schemas");
   schemas.insert({ name: args.name, description: args.description, fields: args.fields, createdAt: new Date().toISOString() });
@@ -141,8 +191,10 @@ server.tool("rag_index_document", "Index a document for RAG: stores structured m
   collection: z.string().describe("Collection name. Must have been set up with rag_collection_setup."),
   id: z.string().describe("Unique document ID."),
   content: z.string().describe("Full text content. This gets embedded for semantic search AND stored in the doc-store."),
-  metadata: z.record(z.any()).optional().describe("Structured metadata: { title, source, author, tags, url, category, etc. }. These fields enable structured filtering later.")
+  metadata: z.record(z.any()).optional().describe("Structured metadata: { title, source, author, tags, url, category, etc. }. These fields enable structured filtering later."),
+  authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set.")
 }, async (args) => {
+  await requireAuth(args.authToken, "editor");
   const db = await getDocStore(args.collection);
   const schemas = db.collection("__schemas");
   const schema = schemas.findOne({ name: args.collection });
@@ -323,6 +375,45 @@ server.tool("rag_collection_info", "Get stats about a RAG collection: document c
   const bm25 = getBM25(args.collection);
   const docIds = docs.find({}).toArray().map(d => d._id).slice(0, 10);
   return { content: [{ type: "text", text: JSON.stringify({ collection: args.collection, schema: schema ? { description: schema.description, fields: schema.fields.map(f => f.name) } : null, docCount: docs.find({}).count(), vectorCount: vStore.ids(args.collection).length, bm25Vocabulary: bm25.vocabularySize(args.collection), sampleIds: docIds }, null, 2) }] };
+});
+
+server.tool("auth_register", "Register a new user account.", {
+  email: z.string(),
+  password: z.string(),
+  role: z.string().optional(),
+}, async (args) => {
+  const auth = await getAuth();
+  if (!auth) throw new Error("AUTH_SECRET not configured");
+  const user = await auth.register(args.email, args.password, { roles: args.role ? [args.role] : undefined });
+  return { content: [{ type: "text", text: JSON.stringify({ registered: user.email, userId: user._id, roles: user.roles }, null, 2) }] };
+});
+
+server.tool("auth_login", "Authenticate and get a JWT token.", {
+  email: z.string(),
+  password: z.string(),
+}, async (args) => {
+  const auth = await getAuth();
+  if (!auth) throw new Error("AUTH_SECRET not configured");
+  const result = await auth.login(args.email, args.password);
+  return { content: [{ type: "text", text: JSON.stringify({ token: result.token, userId: result.user._id, roles: result.user.roles }, null, 2) }] };
+});
+
+server.tool("audit_query", "Query the audit log.", {
+  tool: z.string().optional(),
+  limit: z.number().min(1).max(1000).default(50),
+  sort: z.enum(["newest", "oldest"]).default("newest"),
+  authToken: z.string().optional(),
+}, async (args) => {
+  await requireAuth(args.authToken, null);
+  const col = getAuditCol();
+  const filter = {};
+  if (args.tool) filter.tool = args.tool;
+  let cursor = col.find(filter);
+  if (args.sort === "newest") cursor = cursor.sort({ timestamp: -1 });
+  else cursor = cursor.sort({ timestamp: 1 });
+  cursor = cursor.limit(args.limit);
+  const results = cursor.toArray();
+  return { content: [{ type: "text", text: JSON.stringify({ results, count: results.length }, null, 2) }] };
 });
 
 server.tool("rag_usage_guide", "Get the complete RAG usage guide. Call this when you need help with the RAG workflow or are unsure which tool to use.", {

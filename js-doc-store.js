@@ -2441,7 +2441,7 @@ class GitStorageAdapter {
   }
 
     _doCommit() {
-    const { execSync } = this._getCp();
+    const { execSync, execFileSync } = this._getCp();
     const cwd = this.repoPath;
     if (!this._isGitRepo(cwd)) {
       try { execSync("git init", { cwd, stdio: "ignore" }); } catch {}

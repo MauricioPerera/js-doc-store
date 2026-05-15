@@ -1,0 +1,55 @@
+﻿{
+  "name": "js-doc-store-headless",
+  "version": "1.0.0",
+  "description": "Headless CMS API powered by js-doc-store. Zero-dependency document database with MongoDB-style queries, JWT auth, dynamic schema generation, and portable deploy packages.",
+  "main": "index.js",
+  "bin": {
+    "js-doc-store-headless": "./bin/cli.js"
+  },
+  "scripts": {
+    "start": "node schema-api-auth-server.js",
+    "start:prod": "node schema-api-prod.js",
+    "start:mcp": "node schema-designer-server.js",
+    "demo": "node demo-schema-designer.js"
+  },
+  "keywords": [
+    "headless-cms",
+    "document-database",
+    "nosql",
+    "mongodb",
+    "rest-api",
+    "jwt",
+    "mcp",
+    "schema-designer",
+    "vanilla-js",
+    "deploy",
+    "portable"
+  ],
+  "author": "MauricioPerera",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MauricioPerera/js-doc-store"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.0.0"
+  },
+  "files": [
+    "js-doc-store.js",
+    "schema-designer-server.js",
+    "schema-api-auth-server.js",
+    "schema-api-server.js",
+    "schema-api-prod.js",
+    "schema-portable.js",
+    "mcp-memory-server.js",
+    "demo-schema-designer.js",
+    "demo-crud.js",
+    "demo-export-import.js",
+    "bin/",
+    "README.md"
+  ]
+}

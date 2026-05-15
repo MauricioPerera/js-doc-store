@@ -50,9 +50,9 @@ Ejemplo:
 Puedes filtrar por cualquier campo de metadata ANTES de la busqueda semantica:
 
 - `{ category: "salud" }`
-- `{ tags: { DOLLAR_in: ["ai", "ml"] } }`
+- `{ tags: { $in: ["ai", "ml"] } }`
 - `{ source: "articulo-1", category: "tecnologia" }`
-- `{ createdAt: { DOLLAR_gte: "2024-01-01" } }`
+- `{ createdAt: { $gte: "2024-01-01" } }`
 
 ## Modelo de embeddings
 

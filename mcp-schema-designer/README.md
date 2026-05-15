@@ -9,7 +9,7 @@ Zero-dependency document database with MongoDB-style queries, JWT authentication
 - **Dynamic schemas**: Define collections, fields, types, indexes, and relationships on the fly via MCP or REST
 - **REST API**: Full CRUD endpoints generated automatically from schemas
 - **JWT Authentication**: Built-in auth with register, login, logout, role-based access
-- **MCP Servers**: Two Model Context Protocol servers for Codex/Claude integration
+- **MCP Server**: One Model Context Protocol server for Codex/Claude integration
 - **Portable deploy**: Export schemas + data to a JSON file, deploy anywhere
 - **Auto-import**: Production server auto-loads exported schemas on startup
 - **MongoDB-style queries**: $eq, $gt, $gte, $lt, $lte, $in, $regex, $and, $or, etc.
@@ -96,7 +96,6 @@ fetch('http://localhost:3000/api/blog_cms/posts', {
 ```bash
 # Development
 npx js-doc-store-headless mcp              # Start MCP Schema Designer
-npx js-doc-store-headless mcp:memory       # Start MCP Memory server
 npx js-doc-store-headless api              # Start API with JWT auth
 npx js-doc-store-headless api:basic        # Start API without auth
 npx js-doc-store-headless api:prod         # Start production API (auto-import)
@@ -247,12 +246,10 @@ Add the MCP servers to your Codex configuration:
 
 ```bash
 codex mcp add js-doc-store-schema-designer -- node /path/to/schema-designer-server.js
-codex mcp add js-doc-store-memory -- node /path/to/mcp-memory-server.js
 ```
 
 Then your LLM can:
 - Design database architectures on demand
-- Store and retrieve structured memory
 - Validate data against schemas
 - Query with MongoDB-style filters
 - Export and deploy to production

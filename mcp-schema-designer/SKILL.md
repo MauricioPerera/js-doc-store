@@ -97,3 +97,16 @@ Cuando el contenido esta listo:
 - Para encriptacion a nivel de campo (por ejemplo, SSN, emails sensibles), usa ield_encrypt antes de insertar y ield_decrypt despues de leer.
 - schema_define acepta encrypted: true para marcar el esquema como sensible (metadata; la encriptacion real depende de ENCRYPTION_KEY).
 
+
+## Encriptacion
+
+- Activa encriptacion global con la variable de entorno `ENCRYPTION_KEY`. Si esta configurada, todo el storage se encripta con AES-256-GCM via PBKDF2.
+- Para encriptacion a nivel de campo (por ejemplo, SSN, emails sensibles), usa `field_encrypt` antes de insertar y `field_decrypt` despues de leer.
+- `schema_define` acepta `encrypted: true` para marcar el esquema como sensible (metadata; la encriptacion real depende de `ENCRYPTION_KEY`).
+
+## Git Storage (versionado)
+
+- Activa commits automaticos con `GIT_STORAGE=1`. Cada vez que los datos se persisten, se ejecuta `git add -A` y `git commit`.
+- Personaliza el mensaje con `GIT_COMMIT_MESSAGE`.
+- Ideal para versionar tus colecciones en un repo separado o para backup incremental.
+- Nota: si `ENCRYPTION_KEY` tambien esta activa, los commits contendran blobs cifrados, lo que permite subirlos a GitHub sin riesgo.

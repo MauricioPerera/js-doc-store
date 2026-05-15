@@ -61,6 +61,28 @@ function validateDoc(schema, collectionName, doc, isUpdate = false) {
   return errors;
 }
 
+// Issue #27: validate ref fields point to existing documents
+function validateRefs(schema, collectionName, doc) {
+  const colDef = schema.collections.find(c => c.name === collectionName);
+  if (!colDef) return [];
+  const errors = [];
+  for (const field of colDef.fields) {
+    if (field.type === "ref" && field.refCollection && doc[field.name] !== undefined && doc[field.name] !== null) {
+      const refCol = db.collection(field.refCollection);
+      if (!refCol.findById(doc[field.name])) {
+        errors.push(`Reference not found: ${field.name} "${doc[field.name]}" does not exist in ${field.refCollection}`);
+      }
+    }
+  }
+  return errors;
+}
+
+// Issue #28: wrap plain updates in $set, preserve MongoDB operators
+function wrapUpdate(body) {
+  const hasOperator = Object.keys(body).some(k => k.startsWith("$"));
+  return hasOperator ? body : { $set: body };
+}
+
 function parseFilter(query) {
   const filter = {};
   for (const [key, val] of Object.entries(query)) {
@@ -142,7 +164,9 @@ const server = http.createServer(async (req, res) => {
     // POST
     if (req.method === "POST") {
       const doc = await readBody(req);
-      const errors = validateDoc(schema, collectionName, doc);
+      let errors = validateDoc(schema, collectionName, doc);
+      if (errors.length > 0) return send(res, 400, { error: "Validation failed", errors });
+      errors = validateRefs(schema, collectionName, doc);
       if (errors.length > 0) return send(res, 400, { error: "Validation failed", errors });
       const inserted = col.insert(doc);
       db.flush();
@@ -152,7 +176,7 @@ const server = http.createServer(async (req, res) => {
     // PUT/PATCH
     if (req.method === "PUT" || req.method === "PATCH") {
       if (!docId) return send(res, 400, { error: "Document id required" });
-      const update = await readBody(req);
+      const update = wrapUpdate(await readBody(req));
       const errors = validateDoc(schema, collectionName, update, true);
       if (errors.length > 0) return send(res, 400, { error: "Validation failed", errors });
       col.update({ _id: docId }, update);

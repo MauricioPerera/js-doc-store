@@ -3,7 +3,7 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const z = require("zod/v4");
 const path = require("path");
 
-const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto } = require(path.join(__dirname, "js-doc-store.js"));
+const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto, GitStorageAdapter } = require(path.join(__dirname, "js-doc-store.js"));
 const DATA_DIR = path.join(__dirname, "schema-designer-data");
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
 
@@ -11,11 +11,19 @@ let _adapter = null;
 let _db = null;
 let _fieldCrypto = null;
 
+const GIT_STORAGE = process.env.GIT_STORAGE === "1" || process.env.GIT_STORAGE === "true";
+const GIT_COMMIT_MESSAGE = process.env.GIT_COMMIT_MESSAGE || null;
+
 async function getAdapter() {
   if (_adapter) return _adapter;
-  const inner = new FileStorageAdapter(DATA_DIR);
+  let inner = new FileStorageAdapter(DATA_DIR);
   if (ENCRYPTION_KEY) {
-    _adapter = await EncryptedAdapter.create(inner, ENCRYPTION_KEY);
+    inner = await EncryptedAdapter.create(inner, ENCRYPTION_KEY);
+  }
+  if (GIT_STORAGE) {
+    const opts = { repoPath: DATA_DIR };
+    if (GIT_COMMIT_MESSAGE) opts.commitMessage = GIT_COMMIT_MESSAGE;
+    _adapter = new GitStorageAdapter(inner, opts);
   } else {
     _adapter = inner;
   }

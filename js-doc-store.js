@@ -2306,6 +2306,97 @@ function _base64urlToUint8(str) {
 }
 
 // ---------------------------------------------------------------------------
+// GIT STORAGE ADAPTER (auto-commit wrapper)
+// ---------------------------------------------------------------------------
+
+class GitStorageAdapter {
+  constructor(inner, opts = {}) {
+    this.inner = inner;
+    this.repoPath = opts.repoPath || (inner.dir || ".");
+    this.commitMessage = opts.commitMessage || "Auto-commit: data update";
+    this.authorName = opts.authorName || "js-doc-store";
+    this.authorEmail = opts.authorEmail || "bot@js-doc-store.local";
+    this._dirty = false;
+    this._cp = null;
+  }
+
+  _getCp() {
+    if (!this._cp) this._cp = require("child_process");
+    return this._cp;
+  }
+
+  _exec(cmd, cwd) {
+    const { execSync } = this._getCp();
+    try {
+      return execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+    } catch (e) {
+      return "";
+    }
+  }
+
+  _isGitRepo(cwd) {
+    try {
+      const { execSync } = this._getCp();
+      execSync("git rev-parse --git-dir", { cwd, stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  readJson(filename) { return this.inner.readJson(filename); }
+
+  writeJson(filename, data) {
+    this._dirty = true;
+    return this.inner.writeJson(filename, data);
+  }
+
+  readBin(filename) {
+    if (typeof this.inner.readBin === "function") return this.inner.readBin(filename);
+    return null;
+  }
+
+  writeBin(filename, buffer) {
+    this._dirty = true;
+    if (typeof this.inner.writeBin === "function") return this.inner.writeBin(filename, buffer);
+    throw new Error("GitStorageAdapter: inner adapter does not support writeBin");
+  }
+
+  delete(filename) {
+    this._dirty = true;
+    return this.inner.delete(filename);
+  }
+
+  listKeys() {
+    if (typeof this.inner.listKeys === "function") return this.inner.listKeys();
+    throw new Error("GitStorageAdapter: inner adapter does not support listKeys()");
+  }
+
+  async preload(filenames) {
+    if (typeof this.inner.preload === "function") await this.inner.preload(filenames);
+  }
+
+  async preloadAll() {
+    if (typeof this.inner.preloadAll === "function") await this.inner.preloadAll();
+  }
+
+  async persist() {
+    if (typeof this.inner.persist === "function") await this.inner.persist();
+    if (!this._dirty) return;
+    const { execSync } = this._getCp();
+    const cwd = this.repoPath;
+    if (!this._isGitRepo(cwd)) {
+      try { execSync("git init", { cwd, stdio: "ignore" }); } catch {}
+    }
+    try { execSync("git add -A", { cwd, stdio: "ignore" }); } catch {}
+    try {
+      execSync('git -c user.name="' + this.authorName + '" -c user.email="' + this.authorEmail + '" commit -m "' + this.commitMessage + '" --allow-empty', { cwd, stdio: "ignore" });
+    } catch {}
+    this._dirty = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // EXPORTS
 // ---------------------------------------------------------------------------
 
@@ -2324,9 +2415,11 @@ module.exports = {
   CloudflareKVAdapter,
   EncryptedAdapter,
   FieldCrypto,
+  GitStorageAdapter,
   Auth,
   // Utils
   matchFilter,
   applyUpdate,
   generateId,
 };
+

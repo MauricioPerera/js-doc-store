@@ -3,7 +3,7 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const z = require("zod/v4");
 const path = require("path");
 
-const { DocStore, FileStorageAdapter, EncryptedAdapter } = require(path.join(__dirname, "js-doc-store.js"));
+const { DocStore, FileStorageAdapter, EncryptedAdapter, GitStorageAdapter } = require(path.join(__dirname, "js-doc-store.js"));
 const { VectorStore, BM25Index, HybridSearch, MemoryStorageAdapter } = require(path.join(__dirname, "js-vector-store.js"));
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
@@ -30,13 +30,40 @@ const vectorStores = new Map();
 const bm25s = new Map();
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
 
-async function getDocStore(name) {
-  if (docStores.has(name)) return docStores.get(name);
-  const inner = new FileStorageAdapter(path.join(DATA_DIR, name));
+const GIT_STORAGE = process.env.GIT_STORAGE === "1" || process.env.GIT_STORAGE === "true";
+const GIT_COMMIT_MESSAGE = process.env.GIT_COMMIT_MESSAGE || null;
+
+function _wrapAdapter(inner, dir) {
+  if (ENCRYPTION_KEY) {
+    // EncryptedAdapter is async, handled by caller
+    throw new Error("Use _wrapAdapterAsync for encrypted adapters");
+  }
+  if (GIT_STORAGE) {
+    const opts = { repoPath: dir };
+    if (GIT_COMMIT_MESSAGE) opts.commitMessage = GIT_COMMIT_MESSAGE;
+    return new GitStorageAdapter(inner, opts);
+  }
+  return inner;
+}
+
+async function _wrapAdapterAsync(inner, dir) {
   let adapter = inner;
   if (ENCRYPTION_KEY) {
     adapter = await EncryptedAdapter.create(inner, ENCRYPTION_KEY);
   }
+  if (GIT_STORAGE) {
+    const opts = { repoPath: dir };
+    if (GIT_COMMIT_MESSAGE) opts.commitMessage = GIT_COMMIT_MESSAGE;
+    adapter = new GitStorageAdapter(adapter, opts);
+  }
+  return adapter;
+}
+
+async function getDocStore(name) {
+  if (docStores.has(name)) return docStores.get(name);
+  const dir = path.join(DATA_DIR, name);
+  const inner = new FileStorageAdapter(dir);
+  const adapter = await _wrapAdapterAsync(inner, dir);
   const db = new DocStore(adapter);
   if (typeof adapter.preloadAll === 'function') {
     try { await adapter.preloadAll(); } catch (e) { /* first run or plain */ }
@@ -47,11 +74,9 @@ async function getDocStore(name) {
 
 async function getVectorStore(name, dim = 768) {
   if (vectorStores.has(name)) return vectorStores.get(name);
-  const inner = new FileStorageAdapter(path.join(VECTOR_DIR, name));
-  let adapter = inner;
-  if (ENCRYPTION_KEY) {
-    adapter = await EncryptedAdapter.create(inner, ENCRYPTION_KEY);
-  }
+  const dir = path.join(VECTOR_DIR, name);
+  const inner = new FileStorageAdapter(dir);
+  const adapter = await _wrapAdapterAsync(inner, dir);
   const store = new VectorStore(adapter, dim);
   if (typeof adapter.preloadAll === 'function') {
     try { await adapter.preloadAll(); } catch (e) { /* first run or plain */ }

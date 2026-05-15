@@ -2411,7 +2411,7 @@ class GitStorageAdapter {
     this._timer = setTimeout(() => {
       this._timer = null;
       if (this._dirty) {
-        this.persist().catch(() => {});
+        try { this._doCommit(); } catch {}
       }
     }, this.batchIntervalMs);
   }
@@ -2437,6 +2437,10 @@ class GitStorageAdapter {
   async persist() {
     if (typeof this.inner.persist === "function") await this.inner.persist();
     if (!this._dirty) return;
+    if (this.batchIntervalMs > 0 && this._timer) {
+      // Batch mode: commit will fire when timer expires
+      return;
+    }
     this._doCommit();
   }
 }

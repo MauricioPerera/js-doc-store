@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>js-doc-store + js-vector-store: Ecosistema de Datos para la Era de la IA</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --accent2: #3fb950;
+  --border: #30363d;
+  --card: #161b22;
+  --code-bg: #1e2329;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.7;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+h1 { font-size: 2.4rem; color: var(--accent); margin-bottom: 0.2em; border-bottom: 2px solid var(--accent); padding-bottom: 0.3em; }
+h2 { font-size: 1.7rem; color: var(--accent2); margin-top: 2em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.3rem; color: #d2a8ff; margin-top: 1.6em; }
+h4 { font-size: 1.1rem; color: #79c0ff; margin-top: 1.4em; }
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.88em;
+}
+pre code { border: none; padding: 0; background: transparent; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+strong { color: #fff; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: 0.4em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5em 0;
+  font-size: 0.95rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  text-align: left;
+}
+th { background: var(--card); color: var(--accent); font-weight: 600; }
+tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+footer {
+  margin-top: 4em;
+  padding-top: 2em;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+</style>
+</head>
+<body>
+﻿# js-doc-store + js-vector-store: Un Ecosistema de Datos para la Era de la IA</p><p><h2>Indice</h2></p><p><li><a href="#vision-general">Vision General</a></li>
+<li><a href="#ventajas-del-sistema">Ventajas del Sistema</a></li>
+<li><a href="#arquitectura-tecnica">Arquitectura Tecnica</a></li>
+<li><a href="#casos-de-uso-y-posibilidades">Casos de Uso y Posibilidades</a></li>
+<li><a href="#seguridad-y-cumplimiento">Seguridad y Cumplimiento</a></li>
+<li><a href="#deployment-y-portabilidad">Deployment y Portabilidad</a></li>
+<li><a href="#integracion-con-ia-y-llms">Integracion con IA y LLMs</a></li>
+<li><a href="#flujos-de-trabajo-recomendados">Flujos de Trabajo Recomendados</a></li>
+<li><a href="#comparativa-con-alternativas">Comparativa con Alternativas</a></li>
+<li><a href="#roadmap-y-futuro">Roadmap y Futuro</a></li></p><p><hr></p><p><h2>Vision General</h2></p><p>El ecosistema <strong>js-doc-store + js-vector-store</strong> es una plataforma de datos completa escrita en JavaScript vanilla, diseñada para funcionar en cualquier entorno: Node.js, navegador, Cloudflare Workers, Deno y Bun. No depende de servicios externos ni de infraestructura compleja, lo que lo hace ideal para desarrolladores que buscan soberania sobre sus datos sin sacrificar capacidades modernas.</p><p>El sistema se compone de dos motores principales:</p><p><li><strong>js-doc-store</strong>: Base de datos documental estilo MongoDB con indices, joins, agregaciones, autenticacion, encriptacion y versionado via Git.</li>
+<li><strong>js-vector-store</strong>: Motor de busqueda semantica con embeddings, cuantizacion (int8, binary, polar), BM25, busqueda hibrida (RRF) y clustering IVF.</li></p><p>Ambos motores se exponen via:
+<li><strong>MCP Servers</strong>: Integracion nativa con Codex, Claude y cualquier herramienta compatible con Model Context Protocol.</li>
+<li><strong>REST APIs</strong>: Endpoints HTTP para frontends, servicios y aplicaciones de terceros.</li>
+<li><strong>CLI</strong>: Herramientas de linea de comandos para desarrollo local, exportacion y despliegue.</li></p><p><hr></p><p><h2>Ventajas del Sistema</h2></p><p><h3>1. Cero Dependencias</h3></p><p>El nucleo de ambos motores es un unico archivo JavaScript sin dependencias npm. Esto significa:
+<li>Sin vulnerabilidades de supply chain</li>
+<li>Sin conflictos de versiones</li>
+<li>Sin necesidad de mantener un lockfile enorme</li>
+<li>Copia un archivo y funciona</li></p><p><h3>2. Universalidad de Plataforma</h3></p><p>Funciona identicamente en:
+<li><strong>Node.js</strong> (servidores locales, APIs, scripts)</li>
+<li><strong>Navegador</strong> (almacenamiento local, aplicaciones offline)</li>
+<li><strong>Cloudflare Workers</strong> (edge computing, baja latencia global)</li>
+<li><strong>Deno / Bun</strong> (runtimes modernos)</li></p><p>Esta universalidad permite que una misma base de datos viva en tu laptop de desarrollo, en un Worker en el edge, y en el navegador del usuario sin cambios de codigo.</p><p><h3>3. Modelo de Datos Flexible</h3></p><p>No requiere schemas rigidos. Puedes:
+<li>Definir colecciones dinamicamente via MCP</li>
+<li>Agregar campos sobre la marcha</li>
+<li>Crear indices cuando lo necesites</li>
+<li>Validar con schemas cuando quieras estructura</li></p><p><h3>4. Busqueda Semantica + Estructurada</h3></p><p>El sistema RAG combina lo mejor de ambos mundos:
+<li><strong>Busqueda semantica</strong>: Encuentra documentos por significado, no solo por palabras exactas</li>
+<li><strong>Busqueda por keywords</strong>: BM25 para terminos tecnicos, codigos, nombres propios</li>
+<li><strong>Busqueda hibrida</strong>: RRF fusiona ambos resultados para maxima precision</li>
+<li><strong>Filtrado estructurado</strong>: Aplica filtros MongoDB antes o despues de la busqueda semantica</li></p><p><h3>5. Embeddings Locales</h3></p><p>Via Ollama, generas embeddings localmente sin enviar datos a la nube:
+<li>Compatible con embeddinggemma, nomic-embed-text, etc.</li>
+<li>Sin costos por API call</li>
+<li>Privacidad total: tus documentos nunca salen de tu maquina</li>
+<li>Funciona offline</li></p><p><h3>6. Cuantizacion de Vectores</h3></p><p>Para colecciones grandes, el sistema ofrece compresion agresiva:
+<li><strong>float32</strong>: Precision maxima, 4 bytes por dimension</li>
+<li><strong>int8</strong>: ~4x compresion con perdida minima</li>
+<li><strong>binary</strong>: ~32x compresion, ideal para busqueda aproximada rapida</li>
+<li><strong>polar (3-bit)</strong>: ~21x compresion con recall cercano al 90%</li></p><p><h3>7. Encriptacion de Datos</h3></p><p>AES-256-GCM via PBKDF2:
+<li>Encriptacion global de toda la base de datos</li>
+<li>Encriptacion a nivel de campo para datos sensibles (SSN, emails, etc.)</li>
+<li>Salt aleatorio por instancia (no reutilizable entre deployments)</li>
+<li>Compatible con almacenamiento en Git publico sin riesgo</li></p><p><h3>8. Versionado con Git</h3></p><p>Cada cambio en los datos puede commitearse y versionarse:
+<li>Audit trail completo de quien cambio que y cuando</li>
+<li>Rollback a versiones anteriores</li>
+<li>Replicacion via git push/pull</li>
+<li>Ideal para datos de configuracion, CMS, o knowledge bases</li></p><p><h3>9. Autenticacion y Autorizacion</h3></p><p><li>JWT tokens con expiracion configurable</li>
+<li>RBAC (Role-Based Access Control): admin, editor, viewer</li>
+<li>Audit logging: quien hizo que operacion y cuando</li>
+<li>Proteccion por token en endpoints de escritura</li></p><p><h3>10. Portabilidad Total</h3></p><p>Un esquema definido via MCP puede exportarse a un JSON portable y desplegarse en cualquier lugar:
+<li>Desarrollo local con MCP</li>
+<li>Exportar esquema + datos</li>
+<li>Desplegar en Railway, Render, VPS, o Cloudflare Workers</li>
+<li>El servidor de produccion auto-importa el esquema al arrancar</li></p><p><hr></p><p><h2>Arquitectura Tecnica</h2></p><p><h3>Capas del Sistema</h3></p><p><pre><code class="language-">┌─────────────────────────────────────────────────────────────┐
+│                    Aplicaciones / Frontends                  │
+├─────────────────────────────────────────────────────────────┤
+│  REST API        │  MCP Server        │  CLI               │
+│  (HTTP/JSON)     │  (stdio/SSE)       │  (npx)             │
+├─────────────────────────────────────────────────────────────┤
+│  js-doc-store         │         js-vector-store            │
+│  - DocStore           │         - VectorStore              │
+│  - Collection         │         - BM25Index                │
+│  - Index              │         - HybridSearch             │
+│  - Auth               │         - IVFIndex                 │
+│  - Table/Schema       │         - Reranker                 │
+├─────────────────────────────────────────────────────────────┤
+│  Storage Adapters                                            │
+│  - FileStorageAdapter    (disco local)                     │
+│  - MemoryStorageAdapter  (RAM)                              │
+│  - CloudflareKVAdapter   (Workers KV)                       │
+│  - EncryptedAdapter      (cifrado AES-256)                │
+│  - GitStorageAdapter     (versionado)                      │
+└─────────────────────────────────────────────────────────────┘</code></pre></p><p><h3>js-doc-store: Motor Documental</h3></p><p><li><strong>CRUD completo</strong>: insert, find, update, remove con cursores lazy</li>
+<li><strong>Queries estilo MongoDB</strong>: $eq, $gt, $gte, $lt, $lte, $in, $regex, $and, $or</li>
+<li><strong>Indices</strong>: hash, unique, sorted, compound</li>
+<li><strong>Joins</strong>: lookup entre colecciones</li>
+<li><strong>Agregaciones</strong>: match, group, sort, limit, skip, project, unwind</li>
+<li><strong>Validacion</strong>: schemas con required, unique, type checking</li>
+<li><strong>Relaciones</strong>: campos ref entre colecciones</li></p><p><h3>js-vector-store: Motor Semantico</h3></p><p><li><strong>Embeddings</strong>: Integracion con Ollama para generacion local</li>
+<li><strong>Busqueda</strong>: cosine, euclidean, dotProduct, manhattan</li>
+<li><strong>BM25</strong>: Indice invertido con TF-IDF para busqueda lexical</li>
+<li><strong>Hybrid Search</strong>: Reciprocal Rank Fusion (RRF) de vector + BM25</li>
+<li><strong>IVF Clustering</strong>: K-means para busqueda aproximada en colecciones grandes</li>
+<li><strong>Cross-search</strong>: Busqueda simultanea en multiples colecciones</li>
+<li><strong>Reranker</strong>: Re-ordenamiento de resultados por relevancia</li></p><p><h3>Model Context Protocol (MCP)</h3></p><p>Los MCP servers exponen herramientas que los LLMs pueden invocar:</p><p><strong>Schema Designer MCP</strong>:
+<li><code>schema_define</code>: Define arquitecturas de datos</li>
+<li><code>schema_instantiate</code>: Crea colecciones fisicas</li>
+<li><code>schema_insert</code>, <code>schema_query</code>, <code>schema_update</code>, <code>schema_delete</code>: CRUD</li>
+<li><code>schema_seed</code>: Genera datos de prueba</li>
+<li><code>schema_export</code>, <code>schema_portable</code>: Exporta para deployment</li></p><p><strong>RAG Engine MCP</strong>:
+<li><code>rag_collection_setup</code>: Crea coleccion dual (doc + vector)</li>
+<li><code>rag_index_document</code>: Indexa documentos con embeddings</li>
+<li><code>rag_search</code>: Busqueda con filtrado estructurado</li>
+<li><code>rag_hybrid_search</code>: Busqueda hibrida vector + BM25</li>
+<li><code>rag_context_for_prompt</code>: Formatea resultados para LLM</li></p><p><strong>Vector Store MCP</strong>:
+<li><code>vector_collection_create</code>: Crea coleccion de vectores</li>
+<li><code>vector_index_text</code>: Indexa texto con embeddings automaticos</li>
+<li><code>vector_search</code>: Busqueda semantica</li>
+<li><code>vector_bm25_search</code>: Busqueda por keywords</li>
+<li><code>vector_hybrid_search</code>: Busqueda hibrida RRF</li>
+<li><code>vector_cross_search</code>: Busqueda cross-coleccion</li></p><p><hr></p><p><h2>Casos de Uso y Posibilidades</h2></p><p><h3>1. CMS / Blog Headless</h3></p><p>Define un schema <code>blog_cms</code> con colecciones <code>posts</code>, <code>authors</code>, <code>categories</code>. El LLM puede:
+<li>Crear posts con <code>schema_insert</code></li>
+<li>Consultar posts publicados con <code>schema_query</code></li>
+<li>Exportar el esquema y desplegarlo como API REST</li>
+<li>El frontend consume la API sin saber que hay un LLM detras</li></p><p><h3>2. CRM / Gestion de Clientes</h3></p><p>Schema <code>simple_crm</code> con <code>contacts</code>, <code>companies</code>, <code>deals</code>, <code>activities</code>:
+<li>Relaciones via <code>ref</code> entre contactos y companias</li>
+<li>Indices en emails y telefonos para busqueda rapida</li>
+<li>Agregaciones para dashboards (ventas por mes, pipeline)</li>
+<li>Encriptacion de campo en datos sensibles</li></p><p><h3>3. Knowledge Base / RAG para Soporte</h3></p><p>Coleccion <code>kb</code> con documentacion tecnica:
+<li>Indexa cada articulo con <code>vector_index_text</code></li>
+<li>Busqueda hibrida: encuentra articulos por concepto o termino exacto</li>
+<li>Filtrado por categoria o producto</li>
+<li>Contexto formateado para respuestas de chatbot</li></p><p><h3>4. E-commerce</h3></p><p>Schema <code>ecom_store</code> con <code>products</code>, <code>orders</code>, <code>customers</code>:
+<li>Busqueda semantica de productos: "zapatos para correr en lluvia"</li>
+<li>Filtros estructurados: talla, color, precio</li>
+<li>Carritos persistentes con <code>MemoryStorageAdapter</code> en sesion</li>
+<li>Recomendaciones por similitud de embeddings</li></p><p><h3>5. Task Manager / Project Management</h3></p><p>Schema <code>task_manager</code> con <code>users</code>, <code>projects</code>, <code>tasks</code>:
+<li>Referencias entre tareas y proyectos</li>
+<li>Filtros por estado, prioridad, asignado</li>
+<li>Agregaciones para burndown charts</li>
+<li>Seed de datos para demos</li></p><p><h3>6. Almacenamiento Encriptado en Git Publico</h3></p><p>Con <code>ENCRYPTION_KEY</code> + <code>GIT_STORAGE=1</code>:
+<li>Los datos se encriptan antes de guardar</li>
+<li>Los blobs encriptados se commitean a GitHub</li>
+<li>El encryption key nunca va al repo</li>
+<li>Replicacion via git clone en cualquier entorno</li></p><p><h3>7. Edge Database en Cloudflare Workers</h3></p><p><li>Almacena datos en Workers KV</li>
+<li>Busqueda semantica en el edge (baja latencia global)</li>
+<li>Sin servidor propio: puro serverless</li>
+<li>Escalado automatico</li></p><p><h3>8. Base de Datos Offline-First</h3></p><p>En el navegador con <code>MemoryStorageAdapter</code> o <code>IndexedDB</code>:
+<li>Aplicaciones que funcionan sin internet</li>
+<li>Sincronizacion cuando hay conexion</li>
+<li>Datos locales encriptados</li></p><p><h3>9. Multi-tenant SaaS</h3></p><p><li>Prefijo de coleccion por tenant</li>
+<li>Aislamiento completo de datos</li>
+<li>Un solo Worker sirve a multiples clientes</li>
+<li>Auth por tenant con JWT</li></p><p><h3>10. Pipeline de Datos para IA</h3></p><p><li>Ingesta de documentos via <code>rag_index_document</code></li>
+<li>Chunking manual para textos largos</li>
+<li>Embeddings locales sin costo</li>
+<li>Retrieval para fine-tuning o few-shot prompting</li></p><p><hr></p><p><h2>Seguridad y Cumplimiento</h2></p><p><h3>Encriptacion</h3></p><p><li><strong>AES-256-GCM</strong>: Cifrado autenticado con integridad verificable</li>
+<li><strong>PBKDF2</strong>: Derivacion de clave con 100k iteraciones (OWASP compliant)</li>
+<li><strong>Salt aleatorio</strong>: Cada instancia genera un salt unico de 16 bytes</li>
+<li><strong>Backward compat</strong>: Se puede abrir bases legacy con salt fijo</li></p><p><h3>Autenticacion</h3></p><p><li><strong>JWT</strong>: Tokens firmados con HMAC-SHA256</li>
+<li><strong>RBAC</strong>: Roles (admin, editor, viewer) con permisos diferenciados</li>
+<li><strong>Sesiones</strong>: Expiracion configurable, refresh token en roadmap</li>
+<li><strong>Password policy</strong>: Min length, uppercase, lowercase, digit, symbol</li></p><p><h3>Audit</h3></p><p><li><strong>Audit logging</strong>: Registro automatico de cada operacion (tool, args, user, timestamp)</li>
+<li><strong>Immutable</strong>: Los logs se almacenan en coleccion separada</li>
+<li><strong>Consultable</strong>: <code>audit_query</code> para revisiones de cumplimiento</li></p><p><h3>Seguridad de Deployment</h3></p><p><li><strong>Fail-closed auth</strong>: Si <code>API_TOKEN</code> no esta configurado, solo <code>GET /</code> funciona</li>
+<li><strong>Shell injection fix</strong>: <code>execFileSync</code> con args array en vez de string interpolation</li>
+<li><strong>Input validation</strong>: Zod schemas en todos los endpoints MCP</li></p><p><hr></p><p><h2>Deployment y Portabilidad</h2></p><p><h3>Flujo: Desarrollo -&gt; Produccion</h3></p><p><pre><code class="language-">1. Desarrollo local con MCP
+   npx js-doc-store-headless mcp
+   # LLM disena el schema, inserta datos, prueba queries</p><p><li>Exportar esquema + datos</li>
+   npx js-doc-store-headless export --schema blog_cms --output ./exports</p><p><li>Crear paquete de despliegue</li>
+   npx js-doc-store-headless deploy --schema blog_cms --output ./deploy</p><p><li>Desplegar</li>
+   cd deploy &amp;&amp; node server.js
+   # API REST auto-importa el esquema al arrancar</code></pre></p><p><h3>Opciones de Hosting</h3></p><p><li><strong>Railway / Render</strong>: Node.js server tradicional</li>
+<li><strong>Cloudflare Workers</strong>: Serverless edge con KV</li>
+<li><strong>VPS / Docker</strong>: Control total del entorno</li>
+<li><strong>Local</strong>: Ideal para intranets o desarrollo</li></p><p><h3>Portabilidad de Datos</h3></p><p><li><strong>Export/Import</strong>: JSON portable con schema + colecciones + documentos</li>
+<li><strong>Git</strong>: Versionado y replicable</li>
+<li><strong>Encriptado</strong>: Seguro para almacenamiento publico</li></p><p><hr></p><p><h2>Integracion con IA y LLMs</h2></p><p><h3>Model Context Protocol (MCP)</h3></p><p>El sistema esta disenado para que los LLMs operen directamente sobre los datos:</p><p><li><strong>Schema Designer</strong>: El LLM crea arquitecturas de datos a demanda</li>
+<li><strong>RAG Engine</strong>: El LLM indexa, busca y formatea contexto sin intervencion humana</li>
+<li><strong>Vector Store</strong>: El LLM maneja embeddings y busqueda semantica</li></p><p><h3>Workflows con IA</h3></p><p><strong>Crear una aplicacion completa</strong>:
+<li>Usuario: "Necesito un CRM para mi consultoria"</li>
+<li>LLM llama <code>schema_exists</code> -&gt; no existe</li>
+<li>LLM llama <code>schema_define</code> con colecciones <code>contacts</code>, <code>deals</code>, <code>meetings</code></li>
+<li>LLM llama <code>schema_instantiate</code></li>
+<li>LLM llama <code>schema_seed</code> para datos de demo</li>
+<li>LLM exporta el schema</li>
+<li>Usuario despliega con <code>npx js-doc-store-headless deploy</code></li></p><p><strong>Chatbot con conocimiento privado</strong>:
+<li>Indexar documentos via <code>rag_index_document</code></li>
+<li>Usuario pregunta al chatbot</li>
+<li>LLM llama <code>rag_context_for_prompt</code> para recuperar contexto relevante</li>
+<li>LLM responde con informacion precisa de la base de conocimiento</li></p><p><strong>Analisis de datos</strong>:
+<li>LLM consulta <code>schema_aggregate</code> para obtener metricas</li>
+<li>LLM genera insights y recomendaciones</li>
+<li>LLM actualiza registros con <code>schema_update</code></li></p><p><hr></p><p><h2>Flujos de Trabajo Recomendados</h2></p><p><h3>Desarrollo Local</h3></p><p><pre><code class="language-bash"><h1>Terminal 1: MCP server</h1>
+npx js-doc-store-headless mcp</p><p><h1>Terminal 2: API REST</h1>
+npx js-doc-store-headless api --port 3000</p><p><h1>Codex/Claude se conecta al MCP y opera sobre los datos</h1></code></pre></p><p><h3>Produccion</h3></p><p><pre><code class="language-bash"><h1>Exportar desde desarrollo</h1>
+npx js-doc-store-headless export --schema my_app --output ./exports</p><p><h1>Crear paquete de deployment</h1>
+npx js-doc-store-headless deploy --schema my_app --output ./deploy</p><p><h1>Desplegar</h1>
+cd deploy
+API_TOKEN=secret_key ENCRYPTION_KEY=super_secret node server.js</code></pre></p><p><h3>Backup y Versionado</h3></p><p><pre><code class="language-bash"><h1>Activar git storage</h1>
+export GIT_STORAGE=1
+export GIT_AUTO_PUSH=1
+export GIT_COMMIT_MESSAGE="backup automatico"</p><p><h1>Cada persistencia genera un commit</h1>
+<h1>Cada commit se empuja al remote</h1></code></pre></p><p><hr></p><p><h2>Comparativa con Alternativas</h2></p><p>| Caracteristica | js-doc-store | MongoDB | PostgreSQL | Pinecone | Supabase |
+|---|---|---|---|---|---|
+| Dependencias | 0 | Necesita servidor | Necesita servidor | Cloud-only | Cloud-only |
+| Costo | Gratuito | Licencia/Hosting | Gratuito/Hosting | Por uso | Por uso |
+| Embeddings | Ollama local | No | Extensiones | Si, cloud | Si, cloud |
+| Offline | Si | No | No | No | No |
+| Edge/Workers | Si | No | No | No | Parcial |
+| Git versionado | Si | No | No | No | No |
+| Encriptacion | AES-256-GCM | Enterprise | TDE | Enterprise | Si |
+| Cuantizacion | int8/binary/polar | No | No | No | No |
+| MCP nativo | Si | No | No | No | No |</p><p><hr></p><p><h2>Roadmap y Futuro</h2></p><p><h3>En Desarrollo</h3></p><p><li><strong>Bulk insert</strong>: Ingesta masiva con skip de indexing intermedio</li>
+<li><strong>Refresh tokens</strong>: Rotacion de sesiones sin re-login</li>
+<li><strong>Compresion de blobs</strong>: Gzip antes de KV write</li>
+<li><strong>Soft delete</strong>: Marcado logico en vez de eliminacion fisica</li>
+<li><strong>Schema migrations</strong>: Actualizacion automatica de estructuras</li></p><p><h3>Ideas Futuras</h3></p><p><li><strong>Sync real-time</strong>: WebSocket sync entre cliente y servidor</li>
+<li><strong>Replicacion multi-master</strong>: Conflict resolution CRDT</li>
+<li><strong>Query planner</strong>: Seleccion automatica de indices</li>
+<li><strong>Plugin system</strong>: Extensiones de terceros para adapters</li>
+<li><strong>GUI admin</strong>: Panel visual para gestion de schemas y datos</li></p><p><hr></p><p><h2>Conclusion</h2></p><p>El ecosistema js-doc-store + js-vector-store representa una nueva categoria de plataforma de datos: <strong>soberana, universal e IA-native</strong>. No es solo una base de datos; es un sistema completo que permite a desarrolladores y modelos de lenguaje crear, gestionar y desplegar aplicaciones con datos estructurados y semanticos sin depender de infraestructura externa.</p><p>La combinacion de documentos estructurados con busqueda semantica, la portabilidad total entre plataformas, la encriptacion end-to-end y la integracion nativa con LLMs via MCP lo convierte en una herramienta poderosa para construir el siguiente generation de aplicaciones inteligentes.</p><p><hr></p><p><em>Documento generado el 2026-05-15. Ultima version de los repositorios: js-doc-store master, js-vector-store master.</em>
+
+<footer>
+Documento generado el 2026-05-15. Repositorios: MauricioPerera/js-doc-store + js-vector-store.
+</footer>
+</body>
+</html>

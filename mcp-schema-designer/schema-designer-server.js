@@ -5,6 +5,7 @@ const path = require("path");
 
 const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto, GitStorageAdapter, AggregationPipeline, Auth } = require(path.join(__dirname, "js-doc-store.js"));
 const { validateAccumulators, ACCUMULATOR_HELP } = require(path.join(__dirname, "schema-aggregate-utils.js"));
+const { AUTH_SETUP_HELP, ENCRYPTION_SETUP_HELP, requireAuthSecret, requireEncryptionKey } = require(path.join(__dirname, "schema-security-utils.js"));
 const DATA_DIR = path.join(__dirname, "schema-designer-data");
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
 const AUTH_SECRET = process.env.AUTH_SECRET || null;
@@ -54,7 +55,7 @@ async function getDB() {
 
 async function getFieldCrypto() {
   if (_fieldCrypto) return _fieldCrypto;
-  if (!ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY not set');
+  requireEncryptionKey(ENCRYPTION_KEY);
   _fieldCrypto = await FieldCrypto.create(ENCRYPTION_KEY);
   return _fieldCrypto;
 }
@@ -93,7 +94,7 @@ async function logAudit(toolName, args, token) {
 
 async function requireAuth(token, requiredRole) {
   if (!AUTH_SECRET) return;
-  if (!token) throw new Error('Authentication required: call auth_login first and pass authToken');
+  if (!token) throw new Error('Authentication required: call auth_login first and pass authToken. ' + AUTH_SETUP_HELP);
   const auth = await getAuth();
   const payload = await auth.authorize(token, requiredRole);
   if (!payload) throw new Error(`Unauthorized: role ${requiredRole || 'any'} required`);
@@ -261,6 +262,20 @@ function buildUsageGuide() {
 - Combine with $_and: { $_and: [ { status: "active" }, { priority: { $gte: 5 } } ] }
 - Sort: { createdAt: -1 } for newest first
 - Pagination: limit 10, skip 0 for page 1; limit 10, skip 10 for page 2
+
+## Security & Auth
+- Auth tools (auth_register, auth_login, auth_assign_role, audit_query with filters,
+  secure_delete, rotate_encryption_key) require AUTH_SECRET on the MCP server.
+- Field encryption tools (field_encrypt, field_decrypt, rotate_encryption_key)
+  require ENCRYPTION_KEY on the MCP server.
+- Set both before starting the server:
+    AUTH_SECRET="$(openssl rand -hex 32)" \\
+    ENCRYPTION_KEY="$(openssl rand -hex 32)" \\
+    node schema-designer-server.js
+- Calls to these tools without the required env vars now fail with an actionable
+  error explaining which variable is missing and how to set it.
+- All other CRUD/query/aggregate tools work without these env vars — they are
+  only needed when you want JWT-protected access or at-rest field encryption.
 
 ## Aggregation (schema_aggregate)
 - Stages run in order: match -> group -> sort -> limit -> skip -> project -> unwind -> lookup
@@ -638,30 +653,28 @@ server.tool("schema_aggregate", "Run aggregation pipelines on a schema collectio
   return { content: [{ type: "text", text: JSON.stringify({ results, count: results.length, collection: colName }, null, 2) }] };
 });
 
-server.tool("auth_register", "Register a new user account. Returns a JWT token. Use this FIRST to create an admin account before securing the server with AUTH_SECRET.", {
+server.tool("auth_register", "[REQUIRES AUTH_SECRET env var on the MCP server] Register a new user account. Returns a JWT token. Use this FIRST to create an admin account before securing the server. If the server has no AUTH_SECRET, this tool will fail with setup instructions.", {
   email: z.string().describe("User email."),
   password: z.string().describe("User password."),
   role: z.string().optional().describe("Optional initial role (default: user). Pass admin to create an administrator."),
 }, async (args) => {
-  const auth = await getAuth();
-  if (!auth) throw new Error("AUTH_SECRET not configured on server");
+  const auth = requireAuthSecret(await getAuth());
   const user = await auth.register(args.email, args.password, { roles: args.role ? [args.role] : undefined });
   await flushDB(_db);
   return { content: [{ type: "text", text: JSON.stringify({ registered: user.email, userId: user._id, roles: user.roles }, null, 2) }] };
 });
 
-server.tool("auth_login", "Authenticate and get a JWT token. Pass the token as authToken to protected tools.", {
+server.tool("auth_login", "[REQUIRES AUTH_SECRET env var on the MCP server] Authenticate and get a JWT token. Pass the token as authToken to protected tools. If the server has no AUTH_SECRET, this tool will fail with setup instructions.", {
   email: z.string().describe("User email."),
   password: z.string().describe("User password."),
 }, async (args) => {
-  const auth = await getAuth();
-  if (!auth) throw new Error("AUTH_SECRET not configured on server");
+  const auth = requireAuthSecret(await getAuth());
   const result = await auth.login(args.email, args.password);
   await flushDB(_db);
   return { content: [{ type: "text", text: JSON.stringify({ token: result.token, userId: result.user._id, roles: result.user.roles, expiresIn: result.expiresIn }, null, 2) }] };
 });
 
-server.tool("auth_assign_role", "Assign a role to a user. Requires admin role.", {
+server.tool("auth_assign_role", "[REQUIRES AUTH_SECRET env var on the MCP server] Assign a role to a user. Requires admin role.", {
   userId: z.string().describe("User ID to assign role to."),
   role: z.string().describe("Role to assign (e.g. admin, editor, viewer)."),
   authToken: z.string().describe("JWT token from auth_login."),
@@ -697,12 +710,12 @@ server.tool("audit_query", "Query the audit log. Shows who did what and when. Re
   return { content: [{ type: "text", text: JSON.stringify({ results, count: results.length }, null, 2) }] };
 });
 
-server.tool("rotate_encryption_key", "Re-encrypt all data with a new encryption key. WARNING: old key is no longer usable after this. Returns count of files re-encrypted.", {
+server.tool("rotate_encryption_key", "[REQUIRES ENCRYPTION_KEY env var on the MCP server; admin role if AUTH_SECRET is set] Re-encrypt all data with a new encryption key. WARNING: old key is no longer usable after this. Returns count of files re-encrypted.", {
   newKey: z.string().min(8).describe("New encryption key (must be at least 8 chars)."),
   authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set."),
 }, async (args) => {
   await requireAuth(args.authToken, "admin");
-  if (!ENCRYPTION_KEY) throw new Error("Current ENCRYPTION_KEY not set. Nothing to rotate.");
+  requireEncryptionKey(ENCRYPTION_KEY);
 
   const adapter = await getAdapter();
   const keys = await adapter.listKeys();
@@ -763,7 +776,7 @@ server.tool("secure_delete", "Permanently delete documents. If GIT_STORAGE is ac
   return { content: [{ type: "text", text: JSON.stringify({ deletedCount: ids.length, ids, gitPurged, collection: colName, note: "For full GDPR history purge, run git filter-repo --strip-blobs-bigger-than 1M" }, null, 2) }] };
 });
 
-server.tool("field_encrypt", "Encrypt a field value before storing it. Use when the schema has encrypted:true or when user requests field-level encryption for sensitive data. Requires admin role if AUTH_SECRET is configured.", {
+server.tool("field_encrypt", "[REQUIRES ENCRYPTION_KEY env var on the MCP server; admin role if AUTH_SECRET is set] Encrypt a field value before storing it. Use when the schema has encrypted:true or when user requests field-level encryption for sensitive data.", {
   value: z.string().describe("Value to encrypt."),
   fieldName: z.string().optional().describe("Field name for context."),
   authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set.")
@@ -774,7 +787,7 @@ server.tool("field_encrypt", "Encrypt a field value before storing it. Use when 
   return { content: [{ type: "text", text: JSON.stringify({ encrypted, field: args.fieldName }, null, 2) }] };
 });
 
-server.tool("field_decrypt", "Decrypt a field value after reading it from the database. Use when retrieving documents that contain encrypted fields. Requires admin role if AUTH_SECRET is configured.", {
+server.tool("field_decrypt", "[REQUIRES ENCRYPTION_KEY env var on the MCP server; admin role if AUTH_SECRET is set] Decrypt a field value after reading it from the database. Use when retrieving documents that contain encrypted fields.", {
   encrypted: z.string().describe("Encrypted string from the database."),
   fieldName: z.string().optional().describe("Field name for context."),
   authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set.")

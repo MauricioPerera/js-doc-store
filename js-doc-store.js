@@ -2347,6 +2347,16 @@ function _base64urlToUint8(str) {
 // GIT STORAGE ADAPTER (auto-commit wrapper)
 // ---------------------------------------------------------------------------
 
+// Module-level registry: one set of process listeners shared across all instances.
+// Fixes: multiple listeners per instance causing MaxListenersExceededWarning (#13).
+const _gitAdapters = new Set();
+if (typeof process !== 'undefined' && process.on) {
+  const _flushAll = () => { for (const a of _gitAdapters) a._flushSync(); };
+  process.on('exit',   _flushAll);
+  process.on('SIGINT',  () => { _flushAll(); process.exit(0); });
+  process.on('SIGTERM', () => { _flushAll(); process.exit(0); });
+}
+
 class GitStorageAdapter {
   constructor(inner, opts = {}) {
     this.inner = inner;
@@ -2359,26 +2369,24 @@ class GitStorageAdapter {
     this.pushBranch = opts.pushBranch || "master";
     this.batchIntervalMs = opts.batchIntervalMs || 0;
     this.ignoreBin = opts.ignoreBin || false;
+    this.onError = opts.onError || null;
     this._dirty = false;
     this._cp = null;
     this._timer = null;
     this._shuttingDown = false;
-    this._initShutdownHook();
+    _gitAdapters.add(this);
   }
 
-  _initShutdownHook() {
-    if (typeof process !== "undefined" && process.on) {
-      const flush = () => {
-        if (this._dirty && !this._shuttingDown) {
-          this._shuttingDown = true;
-          try {
-            this._doCommit();
-          } catch {}
-        }
-      };
-      process.on("exit", flush);
-      process.on("SIGINT", () => { flush(); process.exit(0); });
-      process.on("SIGTERM", () => { flush(); process.exit(0); });
+  // Call when the adapter is no longer needed to remove it from the registry.
+  destroy() {
+    _gitAdapters.delete(this);
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+  }
+
+  _flushSync() {
+    if (this._dirty && !this._shuttingDown) {
+      this._shuttingDown = true;
+      try { this._doCommit(); } catch (err) { if (this.onError) this.onError(err); }
     }
   }
 
@@ -2387,23 +2395,24 @@ class GitStorageAdapter {
     return this._cp;
   }
 
-  _exec(cmd, cwd) {
-    const { execSync } = this._getCp();
-    try {
-      return execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-    } catch (e) {
-      return "";
-    }
-  }
-
   _isGitRepo(cwd) {
     try {
-      const { execSync } = this._getCp();
-      execSync("git rev-parse --git-dir", { cwd, stdio: "ignore" });
+      const { execFileSync } = this._getCp();
+      execFileSync('git', ['rev-parse', '--git-dir'], { cwd, stdio: "ignore" });
       return true;
     } catch {
       return false;
     }
+  }
+
+  // Walk the adapter chain to find the innermost FileStorageAdapter dir.
+  _getDataDir() {
+    let adapter = this.inner;
+    while (adapter) {
+      if (adapter.dir) return adapter.dir;
+      adapter = adapter.inner;
+    }
+    return null;
   }
 
   readJson(filename) { return this.inner.readJson(filename); }
@@ -2450,7 +2459,7 @@ class GitStorageAdapter {
     this._timer = setTimeout(() => {
       this._timer = null;
       if (this._dirty) {
-        try { this._doCommit(); } catch {}
+        try { this._doCommit(); } catch (err) { if (this.onError) this.onError(err); }
       }
     }, this.batchIntervalMs);
   }
@@ -2461,9 +2470,7 @@ class GitStorageAdapter {
     const path = require("path");
     const gitignorePath = path.join(cwd, ".gitignore");
     let content = "";
-    try {
-      content = fs.readFileSync(gitignorePath, "utf-8");
-    } catch {}
+    try { content = fs.readFileSync(gitignorePath, "utf-8"); } catch {}
     const lines = content.split("\n").map(l => l.trim());
     const needed = ["*.bin", "*.vec"];
     let changed = false;
@@ -2473,26 +2480,32 @@ class GitStorageAdapter {
         changed = true;
       }
     }
-    if (changed) {
-      fs.writeFileSync(gitignorePath, content, "utf-8");
-    }
+    if (changed) fs.writeFileSync(gitignorePath, content, "utf-8");
   }
 
-    _doCommit() {
+  _doCommit() {
     const { execSync, execFileSync } = this._getCp();
+    const path = require("path");
     const cwd = this.repoPath;
     if (!this._isGitRepo(cwd)) {
-      try { execSync("git init", { cwd, stdio: "ignore" }); } catch {}
+      try { execFileSync('git', ['init'], { cwd, stdio: "ignore" }); } catch (err) { if (this.onError) this.onError(err); }
     }
     this._ensureGitignore(cwd);
-    try { execSync("git add -A", { cwd, stdio: "ignore" }); } catch {}
+    // Scope staging to the data directory only, not the entire repoPath (#14).
+    const dataDir = this._getDataDir();
+    const addTarget = dataDir ? path.relative(cwd, dataDir) : '.';
+    try { execFileSync('git', ['add', '--', addTarget], { cwd, stdio: "ignore" }); } catch (err) { if (this.onError) this.onError(err); }
+    // Skip commit if nothing is staged — avoids empty commits (#15).
+    let status = '';
+    try { status = execSync('git status --porcelain', { cwd, encoding: 'utf-8' }); } catch {}
+    if (!status.trim()) { this._dirty = false; return; }
     try {
-      execFileSync('git', ['-c', 'user.name=' + this.authorName, '-c', 'user.email=' + this.authorEmail, 'commit', '-m', this.commitMessage, '--allow-empty'], { cwd, stdio: 'ignore' });
-    } catch {}
+      execFileSync('git', ['-c', `user.name=${this.authorName}`, '-c', `user.email=${this.authorEmail}`, 'commit', '-m', this.commitMessage], { cwd, stdio: 'ignore' });
+    } catch (err) { if (this.onError) this.onError(err); }
     if (this.autoPush) {
       try {
         execFileSync('git', ['push', this.pushRemote, this.pushBranch], { cwd, stdio: 'ignore' });
-      } catch {}
+      } catch (err) { if (this.onError) this.onError(err); }
     }
     this._dirty = false;
   }
@@ -2500,10 +2513,8 @@ class GitStorageAdapter {
   async persist() {
     if (typeof this.inner.persist === "function") await this.inner.persist();
     if (!this._dirty) return;
-    if (this.batchIntervalMs > 0 && this._timer) {
-      // Batch mode: commit will fire when timer expires
-      return;
-    }
+    // Cancel pending batch timer and commit immediately (#16).
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     this._doCommit();
   }
 }

@@ -1605,20 +1605,38 @@ class EncryptedAdapter {
    * Crea un EncryptedAdapter derivando una key AES-256 del password.
    * @param {object} inner    Adapter interno
    * @param {string} password Password para derivar la key
-   * @param {string} [salt]   Salt (default: 'js-doc-store-v1')
+   * @param {string|null} [salt] Salt explícito (solo para bases existentes con salt fijo).
+   *   Si se omite, genera un salt aleatorio de 16 bytes y lo persiste en
+   *   '__crypto_salt.json' dentro del inner adapter para reutilizarlo en
+   *   aperturas futuras. Pasar 'js-doc-store-v1' para compatibilidad con
+   *   bases creadas antes de este cambio.
    * @returns {Promise<EncryptedAdapter>}
    */
-  static async create(inner, password, salt = 'js-doc-store-v1') {
+  static async create(inner, password, salt = null) {
     const crypto = EncryptedAdapter._getCrypto();
     const enc = new TextEncoder();
 
-    // Derivar key con PBKDF2
+    let saltBytes;
+    if (typeof salt === 'string') {
+      // Salt explícito: compatibilidad con bases existentes
+      saltBytes = enc.encode(salt);
+    } else {
+      const SALT_FILE = '__crypto_salt.json';
+      const stored = inner.readJson(SALT_FILE);
+      if (stored && stored.salt) {
+        saltBytes = _base64ToUint8(stored.salt);
+      } else {
+        const raw = crypto.getRandomValues(new Uint8Array(16));
+        inner.writeJson(SALT_FILE, { salt: _uint8ToBase64(raw) });
+        saltBytes = raw;
+      }
+    }
+
     const keyMaterial = await crypto.subtle.importKey(
       'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
     );
-
     const key = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt: saltBytes, iterations: 100000, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
       false,
@@ -1818,20 +1836,40 @@ function _base64ToUint8(base64) {
 class FieldCrypto {
   constructor(key) { this._key = key; }
 
-  static async create(password, salt = 'js-doc-field-v1') {
+  /**
+   * @param {string} password
+   * @param {string|null} [salt] Salt explícito para reusar una instancia existente.
+   *   Si se omite, genera uno aleatorio y lo expone en `instance.salt` (base64)
+   *   para que sea persistido por el llamador y pasado en aperturas futuras.
+   *   Pasar 'js-doc-field-v1' para compatibilidad con instancias anteriores.
+   */
+  static async create(password, salt = null) {
     const crypto = EncryptedAdapter._getCrypto();
     const enc = new TextEncoder();
+
+    let saltBytes;
+    let autoSalt = null;
+    if (typeof salt === 'string') {
+      saltBytes = enc.encode(salt);
+    } else {
+      const raw = crypto.getRandomValues(new Uint8Array(16));
+      saltBytes = raw;
+      autoSalt = _uint8ToBase64(raw);
+    }
+
     const keyMaterial = await crypto.subtle.importKey(
       'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
     );
     const key = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt: saltBytes, iterations: 100000, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
       false,
       ['encrypt', 'decrypt']
     );
-    return new FieldCrypto(key);
+    const instance = new FieldCrypto(key);
+    if (autoSalt) instance.salt = autoSalt;
+    return instance;
   }
 
   async encrypt(value) {

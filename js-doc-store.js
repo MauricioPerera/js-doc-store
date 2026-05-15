@@ -1764,16 +1764,27 @@ class EncryptedAdapter {
   }
 
   /**
-   * Encripta y persiste todos los datos pendientes.
+   * Encripta y persiste todos los datos pendientes, luego delega al inner adapter.
    * Llamar despues de db.flush().
    */
   async persist() {
-    if (!this._pending) return;
-    for (const [filename, data] of this._pending) {
-      const encrypted = await this._encrypt(data);
-      this.inner.writeJson(filename, { __enc: encrypted });
+    if (this._pending) {
+      for (const [filename, data] of this._pending) {
+        const encrypted = await this._encrypt(data);
+        this.inner.writeJson(filename, { __enc: encrypted });
+      }
+      this._pending.clear();
     }
-    this._pending.clear();
+    if (typeof this.inner.persist === 'function') await this.inner.persist();
+  }
+
+  /**
+   * Libera el plaintext descifrado del cache en memoria.
+   * Útil tras operaciones sensibles o al cerrar el adapter.
+   * Requiere llamar a preload() antes del próximo readJson().
+   */
+  clearCache() {
+    if (this._cache) this._cache.clear();
   }
 
   /**

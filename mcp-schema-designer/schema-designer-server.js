@@ -4,6 +4,7 @@ const z = require("zod/v4");
 const path = require("path");
 
 const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto, GitStorageAdapter, AggregationPipeline, Auth } = require(path.join(__dirname, "js-doc-store.js"));
+const { validateAccumulators, ACCUMULATOR_HELP } = require(path.join(__dirname, "schema-aggregate-utils.js"));
 const DATA_DIR = path.join(__dirname, "schema-designer-data");
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
 const AUTH_SECRET = process.env.AUTH_SECRET || null;
@@ -260,6 +261,23 @@ function buildUsageGuide() {
 - Combine with $_and: { $_and: [ { status: "active" }, { priority: { $gte: 5 } } ] }
 - Sort: { createdAt: -1 } for newest first
 - Pagination: limit 10, skip 0 for page 1; limit 10, skip 10 for page 2
+
+## Aggregation (schema_aggregate)
+- Stages run in order: match -> group -> sort -> limit -> skip -> project -> unwind -> lookup
+- group stage accumulators use MongoDB-style operators keyed by OUTPUT field name:
+    {
+      stage: "group",
+      field: "author",
+      accumulators: {
+        totalViews: { $sum: "views" },
+        avgViews:   { $avg: "views" },
+        count:      { $count: 1 },
+        maxViews:   { $max: "views" }
+      }
+    }
+- Supported operators: $count, $sum, $avg, $min, $max, $push, $first, $last
+- lookup stage joins another collection (set single: true for INNER-JOIN-style single object):
+    { stage: "lookup", from: "user", localField: "author", foreignField: "_id", as: "authorDoc", single: true }
 `;
 }
 
@@ -557,7 +575,7 @@ server.tool("schema_aggregate", "Run aggregation pipelines on a schema collectio
     stage: z.enum(["match", "group", "sort", "limit", "skip", "project", "unwind", "lookup"]).describe("Aggregation stage type."),
     filter: z.record(z.string(), z.any()).optional().describe("For match stage: MongoDB-style filter."),
     field: z.string().optional().describe("For group/unwind stages: field name to group by or unwind."),
-    accumulators: z.record(z.string(), z.any()).optional().describe("For group stage: e.g. avgPrice-dollaer_avg-price etc"),
+    accumulators: z.record(z.string(), z.any()).optional().describe("For group stage: MongoDB-style operator objects keyed by output field name. Example: { totalViews: { $sum: 'views' }, avgPrice: { $avg: 'price' }, count: { $count: 1 }, maxViews: { $max: 'views' } }. Supported operators: $count, $sum, $avg, $min, $max, $push, $first, $last."),
     spec: z.record(z.string(), z.number()).optional().describe("For sort stage: { createdAt: -1 }. For project stage: { name: 1, email: 1 }."),
     n: z.number().optional().describe("For limit/skip stages: number of documents."),
     from: z.string().optional().describe("For lookup stage: foreign collection name."),
@@ -585,7 +603,8 @@ server.tool("schema_aggregate", "Run aggregation pipelines on a schema collectio
         pipeline = pipeline.match(stage.filter || {});
         break;
       case "group":
-        pipeline = pipeline.group(stage.field, stage.accumulators || {});
+        validateAccumulators(stage.accumulators);
+        pipeline = pipeline.group(stage.field, stage.accumulators);
         break;
       case "sort":
         pipeline = pipeline.sort(stage.spec || {});

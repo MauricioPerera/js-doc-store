@@ -3,7 +3,7 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const z = require("zod/v4");
 const path = require("path");
 
-const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto, GitStorageAdapter } = require(path.join(__dirname, "js-doc-store.js"));
+const { DocStore, FileStorageAdapter, EncryptedAdapter, FieldCrypto, GitStorageAdapter, AggregationPipeline } = require(path.join(__dirname, "js-doc-store.js"));
 const DATA_DIR = path.join(__dirname, "schema-designer-data");
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || null;
 
@@ -508,6 +508,75 @@ server.tool("schema_export", "Export a schema and all its data to a portable JSO
 });
 
 
+server.tool("schema_aggregate", "Run aggregation pipelines on a schema collection. Supports group-by, sums, averages, counts, min/max, sorts, limits, lookups/joins, and projections. Use for analytics, dashboards, reports, and statistical summaries.", {
+  schemaName: z.string().describe("Schema name."),
+  collectionName: z.string().describe("Collection name."),
+  prefix: z.string().optional(),
+  pipeline: z.array(z.object({
+    stage: z.enum(["match", "group", "sort", "limit", "skip", "project", "unwind", "lookup"]).describe("Aggregation stage type."),
+    filter: z.record(z.any()).optional().describe("For match stage: MongoDB-style filter."),
+    field: z.string().optional().describe("For group/unwind stages: field name to group by or unwind."),
+    accumulators: z.record(z.any()).optional().describe("For group stage: e.g. avgPrice-dollaer_avg-price etc"),
+    spec: z.record(z.number()).optional().describe("For sort stage: { createdAt: -1 }. For project stage: { name: 1, email: 1 }."),
+    n: z.number().optional().describe("For limit/skip stages: number of documents."),
+    from: z.string().optional().describe("For lookup stage: foreign collection name."),
+    localField: z.string().optional().describe("For lookup stage: local field."),
+    foreignField: z.string().optional().describe("For lookup stage: foreign field."),
+    as: z.string().optional().describe("For lookup stage: output field name."),
+    single: z.boolean().optional().describe("For lookup stage: if true, returns a single object instead of array."),
+  })).describe("Array of aggregation stages executed in order."),
+}, async (args) => {
+  const db = await getDB();
+  const schemas = db.collection("__schemas");
+  const schema = schemas.findOne({ name: args.schemaName });
+  if (!schema) throw new Error(`Schema not found: ${args.schemaName}`);
+
+  const colDef = schema.collections.find(c => c.name === args.collectionName);
+  if (!colDef) throw new Error(`Collection ${args.collectionName} not found in schema ${args.schemaName}`);
+
+  const colName = args.prefix ? args.prefix + args.collectionName : args.collectionName;
+  const col = db.collection(colName);
+
+  let pipeline = col.aggregate();
+  for (const stage of args.pipeline) {
+    switch (stage.stage) {
+      case "match":
+        pipeline = pipeline.match(stage.filter || {});
+        break;
+      case "group":
+        pipeline = pipeline.group(stage.field, stage.accumulators || {});
+        break;
+      case "sort":
+        pipeline = pipeline.sort(stage.spec || {});
+        break;
+      case "limit":
+        pipeline = pipeline.limit(stage.n || 10);
+        break;
+      case "skip":
+        pipeline = pipeline.skip(stage.n || 0);
+        break;
+      case "project":
+        pipeline = pipeline.project(stage.spec || {});
+        break;
+      case "unwind":
+        pipeline = pipeline.unwind(stage.field);
+        break;
+      case "lookup":
+        pipeline = pipeline.lookup({
+          from: stage.from,
+          localField: stage.localField,
+          foreignField: stage.foreignField,
+          as: stage.as,
+          single: stage.single,
+        });
+        break;
+    }
+  }
+
+  const results = pipeline.toArray();
+  return { content: [{ type: "text", text: JSON.stringify({ results, count: results.length, collection: colName }, null, 2) }] };
+});
+
 server.tool("field_encrypt", "Encrypt a field value before storing it. Use when the schema has encrypted:true or when user requests field-level encryption for sensitive data.", {
   value: z.string().describe("Value to encrypt."),
   fieldName: z.string().optional().describe("Field name for context.")
@@ -529,5 +598,5 @@ server.tool("field_decrypt", "Decrypt a field value after reading it from the da
 const transport = new StdioServerTransport();
 server.connect(transport).then(() => {
   console.error("Schema Designer MCP Server started on stdio");
-  console.error("Tools: schema_exists, schema_define, schema_instantiate, schema_insert, schema_query, schema_update, schema_delete, schema_seed, schema_list, schema_export, schema_usage_guide, field_encrypt, field_decrypt");
+  console.error("Tools: schema_exists, schema_define, schema_instantiate, schema_insert, schema_query, schema_update, schema_delete, schema_seed, schema_list, schema_export, schema_usage_guide, schema_aggregate, field_encrypt, field_decrypt");
 });

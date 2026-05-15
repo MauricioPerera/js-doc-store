@@ -115,3 +115,29 @@ Cuando el contenido esta listo:
 - Nota: si `ENCRYPTION_KEY` tambien esta activa, los commits contendran blobs cifrados, lo que permite subirlos a GitHub sin riesgo.
 
 
+## Agregaciones y Analitica
+
+Usa `schema_aggregate` para ejecutar pipelines de agregacion sobre cualquier coleccion. Soporta:
+
+- **match**: Filtrar documentos (estilo MongoDB)
+- **group**: Agrupar por campo con acumuladores: $count, $sum, $avg, $min, $max, $push, $first, $last
+- **sort**: Ordenar resultados
+- **limit** / **skip**: Paginacion
+- **project**: Seleccionar campos
+- **unwind**: Expandir arrays
+- **lookup**: Join con otra coleccion
+
+Ejemplo de pipeline:
+```json
+{
+  "schemaName": "ecommerce",
+  "collectionName": "orders",
+  "pipeline": [
+    { "stage": "match", "filter": { "status": "completed" } },
+    { "stage": "group", "field": "category", "accumulators": { "totalSales": { "$sum": "amount" }, "avgAmount": { "$avg": "amount" }, "count": { "$count": true } } },
+    { "stage": "sort", "spec": { "totalSales": -1 } },
+    { "stage": "limit", "n": 10 }
+  ]
+}
+```
+

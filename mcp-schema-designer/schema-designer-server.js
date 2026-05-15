@@ -373,7 +373,7 @@ server.tool("schema_insert", "Insert a new document into a schema collection. Va
   schemaName: z.string().describe("Schema name. Must exist. Check with schema_exists first if unsure."),
   collectionName: z.string().describe("Collection name (without prefix). Must be defined in the schema."),
   prefix: z.string().optional(),
-  doc: z.record(z.any()).describe("Document to insert. Must satisfy required fields. Use schema_exists skillContext to see expected fields and sample documents.")
+  doc: z.record(z.string(), z.any()).describe("Document to insert. Must satisfy required fields. Use schema_exists skillContext to see expected fields and sample documents.")
 }, async (args) => {
   const db = await getDB();
   const schemas = db.collection("__schemas");
@@ -404,8 +404,8 @@ server.tool("schema_query", "Search/query documents in a schema collection. Use 
   schemaName: z.string().describe("Schema name."),
   collectionName: z.string().describe("Collection name (without prefix)."),
   prefix: z.string().optional(),
-  filter: z.record(z.any()).optional().describe("MongoDB-style query filter. Examples: {} = all; { status: active } = exact match; { priority: { $gte: 5 } } = comparison; { title: { $regex: hello } } = search. Default {} returns all documents."),
-  sort: z.record(z.any()).optional().describe("Sort specification. Example: { createdAt: -1 } for newest first."),
+  filter: z.record(z.string(), z.any()).optional().describe("MongoDB-style query filter. Examples: {} = all; { status: active } = exact match; { priority: { $gte: 5 } } = comparison; { title: { $regex: hello } } = search. Default {} returns all documents."),
+  sort: z.record(z.string(), z.any()).optional().describe("Sort specification. Example: { createdAt: -1 } for newest first."),
   limit: z.number().optional().describe("Max documents to return. Default: all."),
   skip: z.number().optional().describe("Documents to skip for pagination. Example: skip 0 for page 1, skip 10 for page 2 with limit 10.")
 }, async (args) => {
@@ -431,8 +431,8 @@ server.tool("schema_update", "Update documents in a schema collection matching a
   schemaName: z.string().describe("Schema name."),
   collectionName: z.string().describe("Collection name (without prefix)."),
   prefix: z.string().optional(),
-  filter: z.record(z.any()).describe("Filter to match documents to update. Use { _id: specificId } to update a single document."),
-  update: z.record(z.any()).describe("Update object using MongoDB operators. Examples: { $set: { status: done } } sets a field; { $inc: { views: 1 } } increments; { $unset: { tempField: 1 } } removes a field.")
+  filter: z.record(z.string(), z.any()).describe("Filter to match documents to update. Use { _id: specificId } to update a single document."),
+  update: z.record(z.string(), z.any()).describe("Update object using MongoDB operators. Examples: { $set: { status: done } } sets a field; { $inc: { views: 1 } } increments; { $unset: { tempField: 1 } } removes a field.")
 }, async (args) => {
   const db = await getDB();
   const schemas = db.collection("__schemas");
@@ -454,7 +454,7 @@ server.tool("schema_delete", "Delete documents in a schema collection matching a
   schemaName: z.string().describe("Schema name."),
   collectionName: z.string().describe("Collection name (without prefix)."),
   prefix: z.string().optional(),
-  filter: z.record(z.any()).describe("Filter to match documents to delete. Use { _id: specificId } for a single document. Use broader filters only after user confirmation.")
+  filter: z.record(z.string(), z.any()).describe("Filter to match documents to delete. Use { _id: specificId } for a single document. Use broader filters only after user confirmation.")
 }, async (args) => {
   const db = await getDB();
   const schemas = db.collection("__schemas");
@@ -556,10 +556,10 @@ server.tool("schema_aggregate", "Run aggregation pipelines on a schema collectio
   prefix: z.string().optional(),
   pipeline: z.array(z.object({
     stage: z.enum(["match", "group", "sort", "limit", "skip", "project", "unwind", "lookup"]).describe("Aggregation stage type."),
-    filter: z.record(z.any()).optional().describe("For match stage: MongoDB-style filter."),
+    filter: z.record(z.string(), z.any()).optional().describe("For match stage: MongoDB-style filter."),
     field: z.string().optional().describe("For group/unwind stages: field name to group by or unwind."),
-    accumulators: z.record(z.any()).optional().describe("For group stage: e.g. avgPrice-dollaer_avg-price etc"),
-    spec: z.record(z.number()).optional().describe("For sort stage: { createdAt: -1 }. For project stage: { name: 1, email: 1 }."),
+    accumulators: z.record(z.string(), z.any()).optional().describe("For group stage: e.g. avgPrice-dollaer_avg-price etc"),
+    spec: z.record(z.string(), z.number()).optional().describe("For sort stage: { createdAt: -1 }. For project stage: { name: 1, email: 1 }."),
     n: z.number().optional().describe("For limit/skip stages: number of documents."),
     from: z.string().optional().describe("For lookup stage: foreign collection name."),
     localField: z.string().optional().describe("For lookup stage: local field."),
@@ -709,7 +709,7 @@ server.tool("secure_delete", "Permanently delete documents. If GIT_STORAGE is ac
   schemaName: z.string().describe("Schema name."),
   collectionName: z.string().describe("Collection name."),
   prefix: z.string().optional(),
-  filter: z.record(z.any()).describe("Filter to match documents to permanently delete."),
+  filter: z.record(z.string(), z.any()).describe("Filter to match documents to permanently delete."),
   authToken: z.string().optional().describe("JWT token. Required if AUTH_SECRET is set."),
 }, async (args) => {
   await requireAuth(args.authToken, "admin");

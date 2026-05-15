@@ -101,6 +101,7 @@ async function requireAuth(token, requiredRole) {
 }
 
 async function flushDB(db) {
+  if (db && typeof db.flush === 'function') db.flush();
   const adapter = db._adapter || (db._collections && db._collections.values().next().value?._adapter);
   if (adapter && typeof adapter.persist === 'function') {
     await adapter.persist();

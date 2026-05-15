@@ -466,10 +466,9 @@ server.tool("schema_delete", "Delete documents in a schema collection matching a
 
   const colName = args.prefix ? args.prefix + args.collectionName : args.collectionName;
   const col = db.collection(colName);
-  const before = col.find(args.filter).count();
-  col.remove(args.filter);
+  const deletedCount = col.removeMany(args.filter);
   await flushDB(db);
-  return { content: [{ type: "text", text: JSON.stringify({ deletedCount: before, collection: colName, filter: args.filter }, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify({ deletedCount, collection: colName, filter: args.filter }, null, 2) }] };
 });
 
 server.tool("schema_seed", "Generate sample documents for a schema collection. Use when user says generate sample data, demo, test data, or populate. Creates realistic-looking sample documents based on the schema definition.", {

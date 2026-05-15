@@ -76,6 +76,8 @@ ag_collection_setup acepta encrypted: true para marcar la coleccion como sensibl
 
 - Activa commits automaticos con `GIT_STORAGE=1`. Tanto el doc-store como la metadata del vector-store se commitean automaticamente en cada persistencia.
 - Personaliza el mensaje con `GIT_COMMIT_MESSAGE`.
+- **Auto-push**: `GIT_AUTO_PUSH=1` empuja automaticamente al remote despues de cada commit. Configura `GIT_PUSH_REMOTE` (default: origin) y `GIT_PUSH_BRANCH` (default: master).
+- **Batch commits**: `GIT_BATCH_INTERVAL=300` acumula cambios y commitea cada 300 segundos. Default: 0 (inmediato).
 - Ideal para versionar knowledge bases y desplegarlas via git clone.
 
 ## Limitaciones

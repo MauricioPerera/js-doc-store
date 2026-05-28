@@ -19,6 +19,22 @@ function generateId() {
   return `${ts}-${rnd}-${seq}`;
 }
 
+// Stopwords compartidas por matchFilter y TextIndex
+const _STOPWORDS = new Set([
+  'de', 'la', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'un', 'una', 'para', 'con', 'no', 'por', 'su', 'al',
+  'of', 'the', 'in', 'and', 'to', 'for', 'with', 'on', 'at', 'by', 'an', 'is', 'it'
+]);
+
+function _tokenizeText(text) {
+  if (!text || typeof text !== 'string') return [];
+  return text
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Quitar acentos
+    .replace(/[^\w\s-]/g, '') // Eliminar puntuación
+    .split(/[\s_-]+/) // Separar por espacios o guiones
+    .filter(token => token.length > 1 && !_STOPWORDS.has(token));
+}
+
 // ---------------------------------------------------------------------------
 // MATCH FILTER (query engine)
 // ---------------------------------------------------------------------------
@@ -77,6 +93,15 @@ function matchFilter(doc, filter) {
         }
         case '$size': {
           if (!Array.isArray(val) || val.length !== target) return false;
+          break;
+        }
+        case '$text': {
+          if (typeof val !== 'string' || typeof target !== 'string') return false;
+          const queryTokens = _tokenizeText(target);
+          const docTokens = new Set(_tokenizeText(val));
+          for (const token of queryTokens) {
+            if (!docTokens.has(token)) return false;
+          }
           break;
         }
         case '$not': {
@@ -455,6 +480,96 @@ class SortedIndex {
 }
 
 // ---------------------------------------------------------------------------
+// TEXT INDEX (FULL-TEXT INVERTED INDEX)
+// ---------------------------------------------------------------------------
+
+class TextIndex {
+  constructor(field, opts = {}) {
+    this.field = field;
+    this._map = new Map(); // token → Set<docId>
+  }
+
+  _tokenize(text) {
+    return _tokenizeText(text);
+  }
+
+  add(doc) {
+    const val = _getNestedValue(doc, this.field);
+    if (!val || typeof val !== 'string') return;
+    const tokens = this._tokenize(val);
+    for (const token of tokens) {
+      if (!this._map.has(token)) this._map.set(token, new Set());
+      this._map.get(token).add(doc._id);
+    }
+  }
+
+  remove(doc) {
+    const val = _getNestedValue(doc, this.field);
+    if (!val || typeof val !== 'string') return;
+    const tokens = this._tokenize(val);
+    for (const token of tokens) {
+      const set = this._map.get(token);
+      if (set) {
+        set.delete(doc._id);
+        if (set.size === 0) this._map.delete(token);
+      }
+    }
+  }
+
+  lookup(queryText, mode = 'AND') {
+    const tokens = this._tokenize(queryText);
+    if (tokens.length === 0) return [];
+
+    const sets = tokens
+      .map(token => this._map.get(token))
+      .filter(Boolean);
+
+    if (sets.length === 0) return [];
+    if (sets.length !== tokens.length && mode === 'AND') return [];
+
+    if (mode === 'OR') {
+      const union = new Set();
+      for (const set of sets) {
+        for (const id of set) union.add(id);
+      }
+      return Array.from(union);
+    } else { // AND mode
+      sets.sort((a, b) => a.size - b.size);
+      const intersection = new Set(sets[0]);
+      for (let i = 1; i < sets.length; i++) {
+        const currentSet = sets[i];
+        for (const id of intersection) {
+          if (!currentSet.has(id)) {
+            intersection.delete(id);
+          }
+        }
+      }
+      return Array.from(intersection);
+    }
+  }
+
+  clear() { this._map.clear(); }
+
+  rebuild(docs) {
+    this._map.clear();
+    for (const doc of docs) this.add(doc);
+  }
+
+  exportState() {
+    const obj = {};
+    for (const [k, v] of this._map) obj[k] = Array.from(v);
+    return { field: this.field, data: obj };
+  }
+
+  importState(state) {
+    this._map.clear();
+    for (const [k, ids] of Object.entries(state.data)) {
+      this._map.set(k, new Set(ids));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CURSOR (lazy query builder)
 // ---------------------------------------------------------------------------
 
@@ -739,7 +854,65 @@ class AggregationPipeline {
           break;
         }
 
+        case 'graphLookup':
         case 'lookup': {
+          if (stage.type === 'graphLookup') {
+            const store = this._col._store;
+            if (!store) throw new Error('graphLookup requiere referencia de DocStore (usa db.collection())');
+            const fromCol = store.collection(stage.from);
+            fromCol._ensureLoaded();
+
+            // Pre-construir un mapa de connectToField a documentos para lookup O(1)
+            const connectToIdx = new Map();
+            for (const fDoc of fromCol._docs.values()) {
+              const val = _getNestedValue(fDoc, stage.connectToField);
+              if (val === undefined) continue;
+              const key = String(val);
+              if (!connectToIdx.has(key)) connectToIdx.set(key, []);
+              connectToIdx.get(key).push(fDoc);
+            }
+
+            for (const doc of docs) {
+              const visited = new Set();
+              const results = [];
+              const queue = [];
+
+              // Semilla inicial
+              const startVal = _getNestedValue(doc, stage.startWith);
+              if (startVal !== undefined) {
+                if (Array.isArray(startVal)) queue.push(...startVal.map(String));
+                else queue.push(String(startVal));
+              }
+
+              let depth = 0;
+              const maxDepth = stage.maxDepth !== undefined ? stage.maxDepth : Infinity;
+
+              while (queue.length > 0 && depth <= maxDepth) {
+                const levelSize = queue.length;
+                for (let i = 0; i < levelSize; i++) {
+                  const currentKey = queue.shift();
+                  if (visited.has(currentKey)) continue;
+                  visited.add(currentKey);
+
+                  const matches = connectToIdx.get(currentKey) || [];
+                  for (const match of matches) {
+                    const matchCopy = JSON.parse(JSON.stringify(match));
+                    results.push(matchCopy);
+
+                    const nextVal = _getNestedValue(matchCopy, stage.connectFromField);
+                    if (nextVal !== undefined) {
+                      if (Array.isArray(nextVal)) queue.push(...nextVal.map(String));
+                      else queue.push(String(nextVal));
+                    }
+                  }
+                }
+                depth++;
+              }
+              doc[stage.as] = results;
+            }
+            break;
+          }
+
           const store = this._col._store;
           if (!store) throw new Error('lookup requires DocStore reference (use db.collection())');
           const foreignCol = store.collection(stage.from);
@@ -846,6 +1019,8 @@ class Collection {
     let index;
     if (type === 'sorted') {
       index = new SortedIndex(field);
+    } else if (type === 'text') {
+      index = new TextIndex(field);
     } else {
       index = new HashIndex(field, { unique });
     }
@@ -867,7 +1042,9 @@ class Collection {
     if (!index) return;
     this._indexes.delete(field);
     this._indexDefs = this._indexDefs.filter(d => d.field !== field);
-    const type = index instanceof SortedIndex ? 'sorted' : 'hash';
+    let type = 'hash';
+    if (index instanceof SortedIndex) type = 'sorted';
+    else if (index instanceof TextIndex) type = 'text';
     this._adapter.delete(this._indexFile(field, type));
     this._dirty = true;
   }
@@ -995,6 +1172,16 @@ class Collection {
       if (field.startsWith('$')) continue;
       const index = this._indexes.get(field);
       if (!index) continue;
+
+      // Text Index Lookup ($text operator)
+      if (index instanceof TextIndex) {
+        if (cond && typeof cond === 'object' && cond.$text !== undefined) {
+          return index.lookup(cond.$text, cond.$mode || 'AND');
+        }
+        if (typeof cond === 'string') {
+          return index.lookup(cond, 'AND');
+        }
+      }
 
       // Hash index: igualdad directa
       if (index instanceof HashIndex) {
@@ -1136,7 +1323,9 @@ class Collection {
     // Save indexes (only if docs changed)
     if (this._dirtyIds.size > 0) {
       for (const [field, index] of this._indexes) {
-        const type = index instanceof SortedIndex ? 'sorted' : 'hash';
+        let type = 'hash';
+        if (index instanceof SortedIndex) type = 'sorted';
+        else if (index instanceof TextIndex) type = 'text';
         this._adapter.writeJson(this._indexFile(field, type), index.exportState());
       }
     }
@@ -1214,6 +1403,108 @@ class DocStore {
 
   flush() {
     for (const [, col] of this._collections) col.flush();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GRAPH ENGINE - MOTOR TRANSVERSAL DE GRAFOS
+// ---------------------------------------------------------------------------
+
+class GraphEngine {
+  constructor(db, nodesColName = 'nodes', edgesColName = 'edges') {
+    this.db = db;
+    this.nodes = db.collection(nodesColName);
+    this.edges = db.collection(edgesColName);
+
+    // Asegurar índices bidireccionales rápidos en aristas
+    try { this.edges.createIndex('from'); } catch(e) {}
+    try { this.edges.createIndex('to'); } catch(e) {}
+  }
+
+  /**
+   * Retorna vecinos directos de un nodo con información del nodo y de la arista.
+   */
+  getNeighbors(nodeId, direction = 'out', edgeType = null) {
+    const neighbors = [];
+
+    if (direction === 'out' || direction === 'any') {
+      const filter = { from: nodeId };
+      if (edgeType) filter.type = edgeType;
+      const outgoing = this.edges._findRaw(filter);
+      for (const edge of outgoing) {
+        const node = this.nodes.findById(edge.to);
+        if (node) neighbors.push({ node, edge });
+      }
+    }
+
+    if (direction === 'in' || direction === 'any') {
+      const filter = { to: nodeId };
+      if (edgeType) filter.type = edgeType;
+      const incoming = this.edges._findRaw(filter);
+      for (const edge of incoming) {
+        const node = this.nodes.findById(edge.from);
+        if (node) neighbors.push({ node, edge });
+      }
+    }
+
+    return neighbors;
+  }
+
+  /**
+   * BFS para camino más corto. Retorna un array de IDs de nodos.
+   */
+  shortestPathBFS(startNodeId, targetNodeId, edgeType = null) {
+    if (startNodeId === targetNodeId) return [startNodeId];
+
+    const queue = [[startNodeId]];
+    const visited = new Set([startNodeId]);
+
+    while (queue.length > 0) {
+      const path = queue.shift();
+      const currentId = path[path.length - 1];
+
+      const neighbors = this.getNeighbors(currentId, 'out', edgeType);
+      for (const { node } of neighbors) {
+        const neighborId = node._id;
+        if (neighborId === targetNodeId) {
+          return [...path, neighborId];
+        }
+        if (!visited.has(neighborId)) {
+          visited.add(neighborId);
+          queue.push([...path, neighborId]);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * DFS para todos los caminos (con control de ciclos).
+   */
+  findAllPaths(startNodeId, targetNodeId, maxDepth = 5, edgeType = null) {
+    const paths = [];
+
+    const dfs = (currentId, currentPath, depth) => {
+      if (depth > maxDepth) return;
+      if (currentId === targetNodeId) {
+        paths.push([...currentPath]);
+        return;
+      }
+
+      const neighbors = this.getNeighbors(currentId, 'out', edgeType);
+      for (const { node } of neighbors) {
+        const neighborId = node._id;
+        if (!currentPath.includes(neighborId)) {
+          currentPath.push(neighborId);
+          dfs(neighborId, currentPath, depth + 1);
+          currentPath.pop(); // backtracking
+        }
+      }
+    };
+
+    dfs(startNodeId, [startNodeId], 0);
+    return paths;
   }
 }
 
@@ -2597,6 +2888,8 @@ module.exports = {
   AggregationPipeline,
   HashIndex,
   SortedIndex,
+  TextIndex,
+  GraphEngine,
   Table,
   TEMPLATES,
   createFromTemplate,

@@ -185,6 +185,18 @@ users.createIndex('age', { type: 'sorted' });
 users.find({ age: { $gte: 18, $lte: 65 } }).toArray();
 ```
 
+### Text Index (Búsqueda de Texto Completo O(1))
+
+```js
+articles.createIndex('content', { type: 'text' });
+
+// Las búsquedas usan el índice automáticamente (descarte de acentos, minúsculas y stopwords)
+articles.find({ content: { $text: 'Node.js desarrollo' } }).toArray();
+
+// Búsqueda en modo OR (por defecto es AND)
+articles.find({ content: { $text: 'Javascript moderno', $mode: 'OR' } }).toArray();
+```
+
 ### Gestion
 
 ```js
@@ -215,7 +227,7 @@ orders.aggregate()
 | Stage | Descripcion |
 |---|---|
 | `.match(filter)` | Filtra documentos |
-| `.lookup(opts)` | Join con otra coleccion |
+| `.lookup(opts)` | Join ordinario o recursivo transitivo (grafos usando `{ type: 'graphLookup', ... }`) |
 | `.group(field, accumulators)` | Agrupa y calcula agregados |
 | `.sort(spec)` | Ordena (`1` asc, `-1` desc) |
 | `.limit(n)` | Limita resultados |
@@ -268,6 +280,45 @@ orders.aggregate()
   .lookup({ from: 'products', localField: 'productId', foreignField: '_id', as: 'product', single: true })
   .match({ 'product.category': 'hardware' })
   .toArray();
+```
+
+### Graph Lookup (Consultas Recursivas de Grafos)
+
+Permite recorrer estructuras jerárquicas o transitivas (árboles, redes, dependencias) resolviendo ciclos y bucles de forma automatizada:
+
+```js
+// Encontrar toda la red de dependencias conectada a un servidor principal
+const dependencias = nodes.aggregate()
+  .match({ _id: 'servidor-principal' })
+  .lookup({
+    type: 'graphLookup',
+    from: 'edges',                  // Colección donde buscar relaciones
+    startWith: '_id',               // Campo semilla inicial
+    connectFromField: 'to',         // Campo destino de la relación
+    connectToField: 'from',         // Campo origen de la relación
+    as: 'redRecursivaCompleta',     // Nombre del array resultado
+    maxDepth: 3                     // Limitar a 3 niveles de profundidad
+  })
+  .toArray();
+```
+
+## Motor de Grafos (GraphEngine)
+
+`js-doc-store` incorpora una clase auxiliar `GraphEngine` para realizar recorridos de red e identificar caminos de forma ultra-rápida utilizando los mapas indexados en memoria:
+
+```js
+const { GraphEngine } = require('js-doc-store');
+
+const graph = new GraphEngine(db, 'nodes', 'edges');
+
+// 1. Obtener vecinos directos (salientes, entrantes o ambos)
+const vecinos = graph.getNeighbors('nodo-a', 'out', 'LAN');
+
+// 2. BFS: Calcular el camino más corto entre dos nodos (retorna array de IDs)
+const rutaOptima = graph.shortestPathBFS('nodo-a', 'nodo-d'); // ['A', 'B', 'C', 'D']
+
+// 3. DFS: Encontrar todos los caminos posibles con control cíclico automático
+const todosLosCaminos = graph.findAllPaths('nodo-a', 'nodo-d', 5);
 ```
 
 ## Encriptacion

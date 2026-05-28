@@ -352,6 +352,89 @@ dc.insert({ x: 1 });
 dropDb.drop('todrop');
 assert('drop removes collection', !dropDb.collections().includes('todrop'));
 
+// ─── 10. TEXT INDEX ───────────────────────────────────────
+
+section('10. TEXT INDEX');
+
+const textDb = new DocStore(new MemoryStorageAdapter());
+const articles = textDb.collection('articles');
+
+articles.createIndex('content', { type: 'text' });
+articles.insert({ title: 'A1', content: 'Javascript es un lenguaje excelente para desarrollo web.' });
+articles.insert({ title: 'A2', content: 'Cómo optimizar las consultas de base de datos documentales.' });
+articles.insert({ title: 'A3', content: 'Desarrollo backend moderno usando Node.js.' });
+
+// Test 1: Búsqueda básica
+let textRes = articles.find({ content: { $text: 'Javascript' } }).toArray();
+assert('text index find basic', textRes.length === 1 && textRes[0].title === 'A1');
+
+// Test 2: Búsqueda multi-término AND
+textRes = articles.find({ content: { $text: 'desarrollo Javascript' } }).toArray();
+assert('text index AND match', textRes.length === 1 && textRes[0].title === 'A1');
+
+// Test 3: Stopwords
+textRes = articles.find({ content: { $text: 'el desarrollo de backend' } }).toArray();
+assert('text index stopword removal', textRes.length === 1 && textRes[0].title === 'A3');
+
+// Test 4: Normalización de acentos
+textRes = articles.find({ content: { $text: 'cómo' } }).toArray();
+assert('text index accent normalization', textRes.length === 1 && textRes[0].title === 'A2');
+
+// ─── 11. GRAPH ENGINE & $graphLookup ──────────────────────
+
+section('11. GRAPH ENGINE & $graphLookup');
+
+const graphDb = new DocStore(new MemoryStorageAdapter());
+const nodes = graphDb.collection('nodes');
+const edges = graphDb.collection('edges');
+
+nodes.insertMany([
+  { _id: 'A', label: 'Nodo A' },
+  { _id: 'B', label: 'Nodo B' },
+  { _id: 'C', label: 'Nodo C' },
+  { _id: 'D', label: 'Nodo D' }
+]);
+
+edges.insertMany([
+  { from: 'A', to: 'B', type: 'link' },
+  { from: 'B', to: 'C', type: 'link' },
+  { from: 'C', to: 'D', type: 'link' },
+  { from: 'A', to: 'C', type: 'link' } // Camino alternativo más corto
+]);
+
+// Requerir GraphEngine desde el archivo modificado
+const { GraphEngine } = require('./js-doc-store');
+const graph = new GraphEngine(graphDb, 'nodes', 'edges');
+
+// Test 1: Vecinos
+const neighbors = graph.getNeighbors('A', 'out');
+assert('graph neighbors count = 2', neighbors.length === 2);
+
+// Test 2: BFS - Camino más corto
+const path = graph.shortestPathBFS('A', 'D');
+assert('BFS shortest path optimal', path.length === 3 && path[0] === 'A' && path[1] === 'C' && path[2] === 'D');
+
+// Test 3: DFS - Todos los caminos
+const paths = graph.findAllPaths('A', 'D', 5);
+assert('DFS found both paths', paths.length === 2);
+
+// Test 4: Aggregation $graphLookup
+const aggGraph = nodes.aggregate()
+  .match({ _id: 'A' })
+  .lookup({
+    type: 'graphLookup',
+    from: 'edges',
+    startWith: '_id',
+    connectFromField: 'to',
+    connectToField: 'from',
+    as: 'recursiveLinks',
+    maxDepth: 3
+  })
+  .toArray();
+
+assert('graphLookup aggregation executed', aggGraph.length === 1);
+assert('graphLookup collected recursively', aggGraph[0].recursiveLinks.length === 4);
+
 // ─── Summary ─────────────────────────────────────────────
 
 console.log(`\n${'='.repeat(50)}`);

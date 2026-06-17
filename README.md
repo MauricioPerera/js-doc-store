@@ -474,6 +474,20 @@ new DocStore(adapter);
 const adapter = await EncryptedAdapter.create(innerAdapter, 'password');
 new DocStore(adapter);
 
+// Git (wraps any adapter con dir; auto-commitea los cambios a un repo git)
+const adapter = new GitStorageAdapter(new FileStorageAdapter('./data'), {
+  repoPath: '.',                 // raíz del repo (default: el dir del inner, o '.')
+  commitMessage: 'data update',  // mensaje de cada commit
+  authorName: 'js-doc-store',    // se pasan como git -c user.name/email (no shell)
+  authorEmail: 'bot@local',
+  batchIntervalMs: 0,            // >0 agrupa escrituras en un commit cada N ms
+  autoPush: false,               // push a pushRemote/pushBranch tras commitear
+  pushRemote: 'origin', pushBranch: 'master',
+  ignoreBin: false,              // añade *.bin/*.vec al .gitignore
+  onError: null,                 // callback(err) para errores de git
+});
+new DocStore(adapter);
+
 // Custom (implementar 3 metodos):
 class MyAdapter {
   readJson(filename)         { /* → object | null */ }
@@ -481,6 +495,10 @@ class MyAdapter {
   delete(filename)           { /* void            */ }
 }
 ```
+
+`require('js-doc-store')` también exporta utilidades: `matchFilter(doc, filter)`,
+`applyUpdate(doc, update)` y `generateId()` (las primitivas que usan internamente las
+queries, los updates y la generación de `_id`).
 
 ## Archivos de storage
 

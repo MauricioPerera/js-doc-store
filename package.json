@@ -1,6 +1,6 @@
 {
   "name": "js-doc-store",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Zero-dependency vanilla JS document database. MongoDB-style queries, indices, joins, aggregation, encryption, auth.",
   "main": "js-doc-store.js",
   "exports": {

@@ -2175,6 +2175,15 @@ function _base64ToUint8(base64) {
   return uint8;
 }
 
+// Constant-time string comparison to prevent timing attacks
+function _constantTimeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 // ---------------------------------------------------------------------------
 // FIELD-LEVEL ENCRYPTION HELPERS
 // ---------------------------------------------------------------------------
@@ -2394,7 +2403,7 @@ class Auth {
       256
     );
 
-    return _uint8ToBase64(new Uint8Array(hash)) === expectedHash;
+    return _constantTimeEqual(_uint8ToBase64(new Uint8Array(hash)), expectedHash);
   }
 
   // ── JWT (HMAC-SHA256) ────────────────────────────────────

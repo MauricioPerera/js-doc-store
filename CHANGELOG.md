@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 - 2026-07-06
+
+### Fixed
+- **Security**: `Auth._verifyPassword` now compares password hashes in constant time. It previously used `===` on the base64-encoded hash, which short-circuits on the first differing byte (a timing side-channel on matching-prefix length). Added a portable, zero-dependency `_constantTimeEqual` (XOR accumulate, no early exit). Verification behavior is unchanged; regression test in `test-timing-safe.js`. Reported by an external audit of a downstream vendor.
+
 ## 1.0.1 - 2026-05-15
 
 ### Fixed

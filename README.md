@@ -734,6 +734,16 @@ just-bash (sandboxed bash interpreter)
             └── Storage Adapters (Memory, File, KV, Encrypted)
 ```
 
+## Proyectos relacionados
+
+Además del stack de agentes (ver **Ecosistema** arriba), js-doc-store es la base de una cadena de
+librerías embebidas doc+vector:
+
+- **[js-store](https://github.com/MauricioPerera/js-store)** — base de datos embebida doc+vector que
+  **vendoriza este core** y le suma búsqueda vectorial, IVF y persistencia en disco.
+- **[js-base](https://github.com/MauricioPerera/js-base)** — backend embebido estilo PocketBase
+  construido sobre js-store (que a su vez usa este core).
+
 ## Creditos
 
 Creado por [Mauricio Perera](https://www.linkedin.com/in/mauricioperera/)

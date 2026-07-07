@@ -6,6 +6,10 @@ Document database en vanilla JS — zero dependencias. Corre en Node.js, browser
 
 Queries estilo MongoDB con indices, joins, aggregation, encriptacion y autenticacion. Un solo archivo.
 
+> 🧩 **Ecosistema completo** (js-doc-store -> js-store -> js-base + js-vector-store):
+> [`ECOSYSTEM.md`](https://github.com/MauricioPerera/js-base/blob/master/docs/ECOSYSTEM.md) — que es
+> cada capa y cual usar (alojado en el repo de js-base).
+>
 > 📄 **Reporte de analisis** de la jornada (cubre los tres repos de la cadena
 > js-doc-store -> js-store -> js-base):
 > [`ANALISIS-2026-07-06.md`](https://github.com/MauricioPerera/js-base/blob/master/docs/reports/ANALISIS-2026-07-06.md)
